@@ -1,0 +1,6 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/AIDbOptimize.ApiService/AIDbOptimize.ApiService.csproj" />
+    <Project Path="src/AIDbOptimize.AppHost/AIDbOptimize.AppHost.csproj" />
+  </Folder>
+</Solution>
