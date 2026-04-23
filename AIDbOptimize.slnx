@@ -2,5 +2,9 @@
   <Folder Name="/src/">
     <Project Path="src/AIDbOptimize.ApiService/AIDbOptimize.ApiService.csproj" />
     <Project Path="src/AIDbOptimize.AppHost/AIDbOptimize.AppHost.csproj" />
+    <Project Path="src/AIDbOptimize.Application/AIDbOptimize.Application.csproj" />
+    <Project Path="src/AIDbOptimize.DataInit/AIDbOptimize.DataInit.csproj" />
+    <Project Path="src/AIDbOptimize.Domain/AIDbOptimize.Domain.csproj" />
+    <Project Path="src/AIDbOptimize.Infrastructure/AIDbOptimize.Infrastructure.csproj" />
   </Folder>
 </Solution>

@@ -4,11 +4,14 @@ namespace AIDbOptimize.AppHost;
 
 /// <summary>
 /// 统一处理 AppHost 配置加载与校验。
-/// 这里把固定端口、本地开发密码、数据库名等信息全部放进配置文件，
-/// 后续扩展时只需要改配置，不需要在 AppHost 逻辑里到处找硬编码。
+/// 这里把固定端口、数据库名和本地开发口令全部收敛到配置文件中，
+/// 避免后续扩展时继续在编排代码中散落硬编码。
 /// </summary>
 public static class AppHostConfiguration
 {
+    /// <summary>
+    /// 加载 AppHost 所需配置，并在启动初期完成必要校验。
+    /// </summary>
     public static AppHostSettings Load(
         ConfigurationManager configuration,
         string appHostDirectory,
@@ -29,9 +32,8 @@ public static class AppHostConfiguration
     }
 
     /// <summary>
-    /// 加载标准配置源。
-    /// 这里让 Local 文件覆盖公共配置，便于保留一份可提交的默认配置，
-    /// 同时又允许每位开发者在本地做个性化调整。
+    /// 按固定顺序加载配置源。
+    /// Local 文件优先级更高，便于开发者覆盖本地私有配置。
     /// </summary>
     public static void AddConfigurationSources(
         ConfigurationManager configuration,
@@ -57,6 +59,9 @@ public static class AppHostConfiguration
         configuration.AddEnvironmentVariables();
     }
 
+    /// <summary>
+    /// 校验端口号是否为正整数，且不同资源之间不存在重复端口。
+    /// </summary>
     private static void ValidatePorts(AppHostSettings settings)
     {
         var ports = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
@@ -98,19 +103,26 @@ public static class AppHostConfiguration
         throw new InvalidOperationException($"检测到重复端口配置：{duplicates}");
     }
 
+    /// <summary>
+    /// 校验关键配置值不能为空。
+    /// </summary>
     private static void ValidateText(AppHostSettings settings)
     {
-        EnsureRequired(settings.Infrastructure.PostgreSql.Database, "PostgreSql.Database");
+        EnsureRequired(settings.Infrastructure.PostgreSql.ControlPlaneDatabase, "PostgreSql.ControlPlaneDatabase");
+        EnsureRequired(settings.Infrastructure.PostgreSql.LabDatabase, "PostgreSql.LabDatabase");
         EnsureRequired(settings.Infrastructure.PostgreSql.Username, "PostgreSql.Username");
         EnsureRequired(settings.Infrastructure.PostgreSql.Password, "PostgreSql.Password");
 
-        EnsureRequired(settings.Infrastructure.MySql.Database, "MySql.Database");
+        EnsureRequired(settings.Infrastructure.MySql.LabDatabase, "MySql.LabDatabase");
         EnsureRequired(settings.Infrastructure.MySql.Password, "MySql.Password");
 
         EnsureRequired(settings.Infrastructure.RabbitMq.Username, "RabbitMq.Username");
         EnsureRequired(settings.Infrastructure.RabbitMq.Password, "RabbitMq.Password");
     }
 
+    /// <summary>
+    /// 统一处理字符串必填校验。
+    /// </summary>
     private static void EnsureRequired(string? value, string key)
     {
         if (string.IsNullOrWhiteSpace(value))
@@ -121,77 +133,163 @@ public static class AppHostConfiguration
 }
 
 /// <summary>
-/// AppHost 顶层配置。
+/// AppHost 顶层配置对象。
 /// </summary>
 public sealed class AppHostSettings
 {
+    /// <summary>
+    /// 应用端点配置。
+    /// </summary>
     public EndpointSettings Endpoints { get; init; } = new();
 
+    /// <summary>
+    /// 基础设施配置。
+    /// </summary>
     public InfrastructureSettings Infrastructure { get; init; } = new();
 }
 
 /// <summary>
-/// 需要直接暴露到宿主机的应用端口。
+/// 需要直接暴露到宿主机的应用端口配置。
 /// </summary>
 public sealed class EndpointSettings
 {
+    /// <summary>
+    /// API 固定端口。
+    /// </summary>
     public int ApiPort { get; init; }
 
+    /// <summary>
+    /// Web 固定端口。
+    /// </summary>
     public int WebPort { get; init; }
 }
 
 /// <summary>
-/// 所有基础设施资源的固定端口与初始化参数。
+/// 所有基础设施资源的配置集合。
 /// </summary>
 public sealed class InfrastructureSettings
 {
+    /// <summary>
+    /// PostgreSQL 配置。
+    /// </summary>
     public PostgreSqlSettings PostgreSql { get; init; } = new();
 
+    /// <summary>
+    /// MySQL 配置。
+    /// </summary>
     public MySqlSettings MySql { get; init; } = new();
 
+    /// <summary>
+    /// Redis 配置。
+    /// </summary>
     public RedisSettings Redis { get; init; } = new();
 
+    /// <summary>
+    /// RabbitMQ 配置。
+    /// </summary>
     public RabbitMqSettings RabbitMq { get; init; } = new();
 }
 
+/// <summary>
+/// PostgreSQL 资源配置。
+/// </summary>
 public sealed class PostgreSqlSettings
 {
+    /// <summary>
+    /// PostgreSQL 对外服务端口。
+    /// </summary>
     public int Port { get; init; }
 
+    /// <summary>
+    /// pgAdmin 对外管理端口。
+    /// </summary>
     public int ManagementPort { get; init; }
 
-    public string Database { get; init; } = string.Empty;
+    /// <summary>
+    /// 控制面数据库名。
+    /// </summary>
+    public string ControlPlaneDatabase { get; init; } = string.Empty;
 
+    /// <summary>
+    /// 业务测试库数据库名。
+    /// </summary>
+    public string LabDatabase { get; init; } = string.Empty;
+
+    /// <summary>
+    /// PostgreSQL 用户名。
+    /// </summary>
     public string Username { get; init; } = string.Empty;
 
+    /// <summary>
+    /// PostgreSQL 密码。
+    /// </summary>
     public string Password { get; init; } = string.Empty;
 }
 
+/// <summary>
+/// MySQL 资源配置。
+/// </summary>
 public sealed class MySqlSettings
 {
+    /// <summary>
+    /// MySQL 对外服务端口。
+    /// </summary>
     public int Port { get; init; }
 
+    /// <summary>
+    /// phpMyAdmin 对外管理端口。
+    /// </summary>
     public int ManagementPort { get; init; }
 
-    public string Database { get; init; } = string.Empty;
+    /// <summary>
+    /// 业务测试库数据库名。
+    /// </summary>
+    public string LabDatabase { get; init; } = string.Empty;
 
+    /// <summary>
+    /// MySQL 密码。
+    /// </summary>
     public string Password { get; init; } = string.Empty;
 }
 
+/// <summary>
+/// Redis 资源配置。
+/// </summary>
 public sealed class RedisSettings
 {
+    /// <summary>
+    /// Redis 对外服务端口。
+    /// </summary>
     public int Port { get; init; }
 
+    /// <summary>
+    /// Redis Insight 对外管理端口。
+    /// </summary>
     public int ManagementPort { get; init; }
 }
 
+/// <summary>
+/// RabbitMQ 资源配置。
+/// </summary>
 public sealed class RabbitMqSettings
 {
+    /// <summary>
+    /// RabbitMQ 对外服务端口。
+    /// </summary>
     public int Port { get; init; }
 
+    /// <summary>
+    /// RabbitMQ 管理后台对外端口。
+    /// </summary>
     public int ManagementPort { get; init; }
 
+    /// <summary>
+    /// RabbitMQ 用户名。
+    /// </summary>
     public string Username { get; init; } = string.Empty;
 
+    /// <summary>
+    /// RabbitMQ 密码。
+    /// </summary>
     public string Password { get; init; } = string.Empty;
 }

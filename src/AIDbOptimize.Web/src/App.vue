@@ -1,5 +1,21 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import {
+  discoverConnectionTools,
+  getConnectionTools,
+  getDataInitializationStatus,
+  getMcpConnections,
+  updateToolApprovalMode,
+} from './api/mcp'
+import type {
+  DataInitializationStatus,
+  McpConnection,
+  McpTool,
+} from './models/mcp'
+import DataInitStatusPanel from './components/mcp/DataInitStatusPanel.vue'
+import McpConnectionTable from './components/mcp/McpConnectionTable.vue'
+import McpToolExecutor from './components/mcp/McpToolExecutor.vue'
+import McpToolTable from './components/mcp/McpToolTable.vue'
 
 interface ServiceStatus {
   name: string
@@ -27,12 +43,20 @@ interface ResourceCard {
   managementLabel?: string
 }
 
-// 页面状态保持尽量简单，方便后续继续扩展成真实业务首页。
+const activeView = ref<'overview' | 'mcp'>('overview')
 const loading = ref(true)
 const errorMessage = ref('')
 const overview = ref<InfrastructureOverview | null>(null)
 
-// 管理入口链接由 Aspire 在启动前注入，因此前端不需要硬编码地址。
+const mcpLoading = ref(true)
+const mcpErrorMessage = ref('')
+const mcpConnections = ref<McpConnection[]>([])
+const selectedConnectionId = ref('')
+const toolsLoading = ref(false)
+const tools = ref<McpTool[]>([])
+const initStatusesLoading = ref(true)
+const initStatuses = ref<DataInitializationStatus[]>([])
+
 const resourceLinks = computed<ResourceLink[]>(() => [
   {
     title: 'API 健康检查',
@@ -66,7 +90,6 @@ const resourceLinks = computed<ResourceLink[]>(() => [
   },
 ])
 
-// 资源用途和端口说明属于本地开发文档型信息，不需要单独走后端接口。
 const resourceCards = computed<ResourceCard[]>(() => [
   {
     name: 'PostgreSQL',
@@ -103,6 +126,14 @@ const injectedServiceCount = computed(() => {
 })
 
 onMounted(async () => {
+  await Promise.all([
+    loadInfrastructureOverview(),
+    loadMcpConnections(),
+    loadInitializationStatuses(),
+  ])
+})
+
+async function loadInfrastructureOverview(): Promise<void> {
   try {
     const response = await fetch('/api/infrastructure')
     if (!response.ok) {
@@ -115,7 +146,74 @@ onMounted(async () => {
   } finally {
     loading.value = false
   }
-})
+}
+
+async function loadMcpConnections(): Promise<void> {
+  try {
+    mcpConnections.value = await getMcpConnections()
+    selectedConnectionId.value = mcpConnections.value[0]?.id ?? ''
+
+    if (selectedConnectionId.value) {
+      await loadTools(selectedConnectionId.value)
+    }
+  } catch (error) {
+    mcpErrorMessage.value = error instanceof Error ? error.message : '加载 MCP 连接失败'
+  } finally {
+    mcpLoading.value = false
+  }
+}
+
+async function loadTools(connectionId: string): Promise<void> {
+  toolsLoading.value = true
+
+  try {
+    tools.value = await getConnectionTools(connectionId)
+  } catch (error) {
+    mcpErrorMessage.value = error instanceof Error ? error.message : '加载工具失败'
+  } finally {
+    toolsLoading.value = false
+  }
+}
+
+async function handleDiscover(connectionId: string): Promise<void> {
+  toolsLoading.value = true
+
+  try {
+    tools.value = await discoverConnectionTools(connectionId)
+    selectedConnectionId.value = connectionId
+  } catch (error) {
+    mcpErrorMessage.value = error instanceof Error ? error.message : '获取工具失败'
+  } finally {
+    toolsLoading.value = false
+  }
+}
+
+async function handleSelectConnection(connectionId: string): Promise<void> {
+  selectedConnectionId.value = connectionId
+  await loadTools(connectionId)
+}
+
+async function handleApprovalChange(toolId: string, approvalMode: number): Promise<void> {
+  try {
+    await updateToolApprovalMode(toolId, approvalMode)
+    const tool = tools.value.find((item) => item.id === toolId)
+    if (tool) {
+      tool.approvalMode = approvalMode
+    }
+  } catch (error) {
+    mcpErrorMessage.value = error instanceof Error ? error.message : '更新审批模式失败'
+  }
+}
+
+async function loadInitializationStatuses(): Promise<void> {
+  try {
+    initStatuses.value = await getDataInitializationStatus()
+  } catch (error) {
+    mcpErrorMessage.value = error instanceof Error ? error.message : '加载初始化状态失败'
+  } finally {
+    initStatusesLoading.value = false
+  }
+}
 </script>
 
 <template>
@@ -124,8 +222,8 @@ onMounted(async () => {
       <p class="eyebrow">Aspire 中文开发骨架</p>
       <h1>AIDbOptimize</h1>
       <p class="hero-copy">
-        这个首页用于确认 Aspire 是否已经把 API、Vue 前端和四类基础设施资源编排起来。
-        首页只展示资源说明、固定端口、管理入口和注入状态，不直接显示默认密码。
+        当前页面分成“资源概览”和“MCP 管理”两部分。
+        资源概览用于确认基础设施是否已编排完成，MCP 管理用于查看默认连接、发现工具、调整审批模式和观察初始化状态。
       </p>
 
       <div class="hero-stats">
@@ -144,95 +242,142 @@ onMounted(async () => {
       </div>
     </section>
 
-    <section class="panel-grid">
-      <article class="panel">
-        <h2>使用提示</h2>
-        <div class="tips-grid">
-          <div class="tip-card">
-            <strong>启动入口</strong>
-            <span>通过 AppHost 启动整个系统，而不是单独启动前后端。</span>
-          </div>
-          <div class="tip-card">
-            <strong>固定端口</strong>
-            <span>数据库、缓存、消息队列和管理面板都使用配置文件中的固定端口。</span>
-          </div>
-          <div class="tip-card">
-            <strong>默认账号</strong>
-            <span>默认账号和密码统一写在 README 中，页面不直接显示密码。</span>
-          </div>
-        </div>
-      </article>
-
-      <article class="panel">
-        <h2>管理入口</h2>
-        <div class="link-grid">
-          <a
-            v-for="link in resourceLinks"
-            :key="link.title"
-            class="resource-link"
-            :href="link.href"
-            target="_blank"
-            rel="noreferrer"
-          >
-            <strong>{{ link.title }}</strong>
-            <span>{{ link.description }}</span>
-          </a>
-        </div>
-      </article>
-    </section>
-
-    <section class="panel">
-      <h2>资源说明</h2>
-      <div class="resource-card-grid">
-        <article
-          v-for="resource in resourceCards"
-          :key="resource.name"
-          class="resource-card"
+    <section class="panel nav-panel">
+      <div class="view-switch">
+        <button
+          type="button"
+          :class="{ active: activeView === 'overview' }"
+          @click="activeView = 'overview'"
         >
-          <h3>{{ resource.name }}</h3>
-          <p>{{ resource.purpose }}</p>
-          <dl class="resource-meta">
-            <div>
-              <dt>服务端口</dt>
-              <dd>{{ resource.servicePort }}</dd>
-            </div>
-            <div v-if="resource.managementPort && resource.managementLabel">
-              <dt>{{ resource.managementLabel }}</dt>
-              <dd>{{ resource.managementPort }}</dd>
-            </div>
-          </dl>
-        </article>
+          资源概览
+        </button>
+        <button
+          type="button"
+          :class="{ active: activeView === 'mcp' }"
+          @click="activeView = 'mcp'"
+        >
+          MCP 管理
+        </button>
       </div>
     </section>
 
-    <section class="panel">
-      <h2>连接状态</h2>
-      <p v-if="loading" class="state-text">正在读取 Aspire 注入的连接字符串...</p>
-      <p v-else-if="errorMessage" class="state-text error">{{ errorMessage }}</p>
-      <template v-else-if="overview">
-        <p class="state-text">
-          当前环境：<strong>{{ overview.environmentName }}</strong>
-        </p>
+    <template v-if="activeView === 'overview'">
+      <section class="panel-grid">
+        <article class="panel">
+          <h2>使用提示</h2>
+          <div class="tips-grid">
+            <div class="tip-card">
+              <strong>启动入口</strong>
+              <span>通过 AppHost 启动整个系统，而不是单独启动前后端。</span>
+            </div>
+            <div class="tip-card">
+              <strong>固定端口</strong>
+              <span>数据库、缓存、消息队列和管理面板都使用配置文件中的固定端口。</span>
+            </div>
+            <div class="tip-card">
+              <strong>默认账号</strong>
+              <span>默认账号和密码统一写在 README 中，页面不直接显示密码。</span>
+            </div>
+          </div>
+        </article>
 
-        <ul class="status-list">
-          <li
-            v-for="service in overview.services"
-            :key="service.connectionName"
-            class="status-item"
+        <article class="panel">
+          <h2>管理入口</h2>
+          <div class="link-grid">
+            <a
+              v-for="link in resourceLinks"
+              :key="link.title"
+              class="resource-link"
+              :href="link.href"
+              target="_blank"
+              rel="noreferrer"
+            >
+              <strong>{{ link.title }}</strong>
+              <span>{{ link.description }}</span>
+            </a>
+          </div>
+        </article>
+      </section>
+
+      <section class="panel">
+        <h2>资源说明</h2>
+        <div class="resource-card-grid">
+          <article
+            v-for="resource in resourceCards"
+            :key="resource.name"
+            class="resource-card"
           >
-            <div>
-              <strong>{{ service.name }}</strong>
-              <span>{{ service.connectionName }}</span>
-            </div>
-            <div class="status-meta">
-              <em :class="service.isConfigured ? 'ok' : 'fail'">
-                {{ service.isConfigured ? '已注入' : '未注入' }}
-              </em>
-              <code>{{ service.preview }}</code>
-            </div>
-          </li>
-        </ul>
-      </template>
-    </section>
+            <h3>{{ resource.name }}</h3>
+            <p>{{ resource.purpose }}</p>
+            <dl class="resource-meta">
+              <div>
+                <dt>服务端口</dt>
+                <dd>{{ resource.servicePort }}</dd>
+              </div>
+              <div v-if="resource.managementPort && resource.managementLabel">
+                <dt>{{ resource.managementLabel }}</dt>
+                <dd>{{ resource.managementPort }}</dd>
+              </div>
+            </dl>
+          </article>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>连接状态</h2>
+        <p v-if="loading" class="state-text">正在读取 Aspire 注入的连接字符串...</p>
+        <p v-else-if="errorMessage" class="state-text error">{{ errorMessage }}</p>
+        <template v-else-if="overview">
+          <p class="state-text">
+            当前环境：<strong>{{ overview.environmentName }}</strong>
+          </p>
+
+          <ul class="status-list">
+            <li
+              v-for="service in overview.services"
+              :key="service.connectionName"
+              class="status-item"
+            >
+              <div>
+                <strong>{{ service.name }}</strong>
+                <span>{{ service.connectionName }}</span>
+              </div>
+              <div class="status-meta">
+                <em :class="service.isConfigured ? 'ok' : 'fail'">
+                  {{ service.isConfigured ? '已注入' : '未注入' }}
+                </em>
+                <code>{{ service.preview }}</code>
+              </div>
+            </li>
+          </ul>
+        </template>
+      </section>
+    </template>
+
+    <template v-else>
+      <p v-if="mcpErrorMessage" class="state-text error">{{ mcpErrorMessage }}</p>
+      <section class="panel-grid">
+        <McpConnectionTable
+          :connections="mcpConnections"
+          :loading="mcpLoading"
+          :current-connection-id="selectedConnectionId"
+          @select="handleSelectConnection"
+          @discover="handleDiscover"
+        />
+        <DataInitStatusPanel
+          :statuses="initStatuses"
+          :loading="initStatusesLoading"
+        />
+      </section>
+
+      <section class="panel-grid">
+        <McpToolTable
+          :tools="tools"
+          :loading="toolsLoading"
+          @change-approval="handleApprovalChange"
+        />
+        <McpToolExecutor :tools="tools" />
+      </section>
+    </template>
   </main>
 </template>

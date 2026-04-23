@@ -18,6 +18,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\AIDbOptimize.ApiService\AIDbOptimize.ApiService.csproj" />
+    <ProjectReference Include="..\AIDbOptimize.DataInit\AIDbOptimize.DataInit.csproj" />
   </ItemGroup>
 
 </Project>

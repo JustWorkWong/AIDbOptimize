@@ -64,7 +64,7 @@
 
 ## 阶段 1：解决方案分层重构
 
-- [ ] T1.1 新增 `AIDbOptimize.Domain` 项目
+- [x] T1.1 新增 `AIDbOptimize.Domain` 项目
   - 依赖：T0.4
   - 产出物：
     - `src/AIDbOptimize.Domain/AIDbOptimize.Domain.csproj`
@@ -73,7 +73,7 @@
   - 完成标准：
     - `Domain` 项目已存在且已加入解决方案
 
-- [ ] T1.2 新增 `AIDbOptimize.Application` 项目
+- [x] T1.2 新增 `AIDbOptimize.Application` 项目
   - 依赖：T1.1
   - 产出物：
     - `src/AIDbOptimize.Application/AIDbOptimize.Application.csproj`
@@ -82,7 +82,7 @@
   - 完成标准：
     - `Application` 项目已存在且已加入解决方案
 
-- [ ] T1.3 新增 `AIDbOptimize.Infrastructure` 项目
+- [x] T1.3 新增 `AIDbOptimize.Infrastructure` 项目
   - 依赖：T1.2
   - 产出物：
     - `src/AIDbOptimize.Infrastructure/AIDbOptimize.Infrastructure.csproj`
@@ -91,7 +91,7 @@
   - 完成标准：
     - `Infrastructure` 项目已存在且已加入解决方案
 
-- [ ] T1.4 新增 `AIDbOptimize.DataInit` 项目
+- [x] T1.4 新增 `AIDbOptimize.DataInit` 项目
   - 依赖：T1.3
   - 产出物：
     - `src/AIDbOptimize.DataInit/AIDbOptimize.DataInit.csproj`
@@ -100,7 +100,7 @@
   - 完成标准：
     - `DataInit` 项目已存在且已加入解决方案
 
-- [ ] T1.5 配置项目引用关系
+- [x] T1.5 配置项目引用关系
   - 依赖：T1.4
   - 产出物：
     - 各项目 `.csproj` 引用关系
@@ -109,7 +109,7 @@
   - 完成标准：
     - 依赖方向满足 `Domain <- Application <- Infrastructure <- ApiService/AppHost/DataInit`
 
-- [ ] T1.6 调整 `ApiService` 引用到新分层
+- [x] T1.6 调整 `ApiService` 引用到新分层
   - 依赖：T1.5
   - 产出物：
     - `src/AIDbOptimize.ApiService/AIDbOptimize.ApiService.csproj`
@@ -118,7 +118,7 @@
   - 完成标准：
     - `ApiService` 不再直接承载领域与基础设施细节
 
-- [ ] T1.7 调整 `AppHost` 引用到新分层与 `DataInit`
+- [x] T1.7 调整 `AppHost` 引用到新分层与 `DataInit`
   - 依赖：T1.6
   - 产出物：
     - `src/AIDbOptimize.AppHost/AIDbOptimize.AppHost.csproj`
@@ -129,7 +129,7 @@
 
 ## 阶段 2：订单域 DDD 模型
 
-- [ ] T2.1 新增订单状态枚举 `OrderStatus`
+- [x] T2.1 新增订单状态枚举 `OrderStatus`
   - 依赖：T1.1
   - 产出物：
     - `Domain/Orders/Enums/OrderStatus.cs`
@@ -138,7 +138,7 @@
   - 完成标准：
     - 枚举值与详细设计一致
 
-- [ ] T2.2 新增值对象 `OrderNumber`
+- [x] T2.2 新增值对象 `OrderNumber`
   - 依赖：T2.1
   - 产出物：
     - `Domain/Orders/ValueObjects/OrderNumber.cs`
@@ -147,7 +147,7 @@
   - 完成标准：
     - 具备非空与格式校验
 
-- [ ] T2.3 新增值对象 `Money`
+- [x] T2.3 新增值对象 `Money`
   - 依赖：T2.2
   - 产出物：
     - `Domain/Orders/ValueObjects/Money.cs`
@@ -156,7 +156,7 @@
   - 完成标准：
     - 具备金额规范化与基础运算能力
 
-- [ ] T2.4 新增实体 `OrderItem`
+- [x] T2.4 新增实体 `OrderItem`
   - 依赖：T2.3
   - 产出物：
     - `Domain/Orders/Entities/OrderItem.cs`
@@ -165,7 +165,7 @@
   - 完成标准：
     - 能表达订单明细核心字段和金额规则
 
-- [ ] T2.5 新增聚合根 `Order`
+- [x] T2.5 新增聚合根 `Order`
   - 依赖：T2.4
   - 产出物：
     - `Domain/Orders/Aggregates/Order.cs`
@@ -174,7 +174,7 @@
   - 完成标准：
     - 能创建订单、追加明细、汇总总金额、变更状态
 
-- [ ] T2.6 新增仓储接口 `IOrderRepository`
+- [x] T2.6 新增仓储接口 `IOrderRepository`
   - 依赖：T2.5
   - 产出物：
     - `Domain/Orders/Repositories/IOrderRepository.cs`
@@ -185,7 +185,7 @@
 
 ## 阶段 3：控制面领域模型
 
-- [ ] T3.1 新增数据库引擎枚举 `DatabaseEngine`
+- [x] T3.1 新增数据库引擎枚举 `DatabaseEngine`
   - 依赖：T1.1
   - 产出物：
     - `Domain/Mcp/Enums/DatabaseEngine.cs`
@@ -194,7 +194,7 @@
   - 完成标准：
     - 枚举至少包含 `PostgreSql` 和 `MySql`
 
-- [ ] T3.2 新增工具权限枚举 `ToolApprovalMode`
+- [x] T3.2 新增工具权限枚举 `ToolApprovalMode`
   - 依赖：T3.1
   - 产出物：
     - `Domain/Mcp/Enums/ToolApprovalMode.cs`
@@ -203,7 +203,7 @@
   - 完成标准：
     - 枚举至少包含 `NoApproval` 和 `ApprovalRequired`
 
-- [ ] T3.3 新增 MCP 连接状态枚举 `McpConnectionStatus`
+- [x] T3.3 新增 MCP 连接状态枚举 `McpConnectionStatus`
   - 依赖：T3.2
   - 产出物：
     - `Domain/Mcp/Enums/McpConnectionStatus.cs`
@@ -212,7 +212,7 @@
   - 完成标准：
     - 状态值与详细设计一致
 
-- [ ] T3.4 新增数据初始化状态枚举 `DataInitializationState`
+- [x] T3.4 新增数据初始化状态枚举 `DataInitializationState`
   - 依赖：T3.3
   - 产出物：
     - `Domain/Seed/Enums/DataInitializationState.cs`
@@ -223,7 +223,7 @@
 
 ## 阶段 4：控制面数据库模型与迁移
 
-- [ ] T4.1 新增控制面实体 `McpConnectionEntity`
+- [x] T4.1 新增控制面实体 `McpConnectionEntity`
   - 依赖：T1.3, T3.3
   - 产出物：
     - `Infrastructure/Persistence/Entities/McpConnectionEntity.cs`
@@ -232,7 +232,7 @@
   - 完成标准：
     - 字段与详细设计中的 `mcp_connections` 一致
 
-- [ ] T4.2 新增控制面实体 `McpToolEntity`
+- [x] T4.2 新增控制面实体 `McpToolEntity`
   - 依赖：T4.1, T3.2
   - 产出物：
     - `Infrastructure/Persistence/Entities/McpToolEntity.cs`
@@ -241,7 +241,7 @@
   - 完成标准：
     - 字段与详细设计中的 `mcp_tools` 一致
 
-- [ ] T4.3 新增控制面实体 `McpToolExecutionEntity`
+- [x] T4.3 新增控制面实体 `McpToolExecutionEntity`
   - 依赖：T4.2
   - 产出物：
     - `Infrastructure/Persistence/Entities/McpToolExecutionEntity.cs`
@@ -250,7 +250,7 @@
   - 完成标准：
     - 字段与详细设计中的 `mcp_tool_executions` 一致
 
-- [ ] T4.4 新增控制面实体 `DataInitializationRunEntity`
+- [x] T4.4 新增控制面实体 `DataInitializationRunEntity`
   - 依赖：T4.3, T3.4
   - 产出物：
     - `Infrastructure/Persistence/Entities/DataInitializationRunEntity.cs`
@@ -259,7 +259,7 @@
   - 完成标准：
     - 字段与详细设计中的 `data_initialization_runs` 一致
 
-- [ ] T4.5 新增 `ControlPlaneDbContext`
+- [x] T4.5 新增 `ControlPlaneDbContext`
   - 依赖：T4.1, T4.2, T4.3, T4.4
   - 产出物：
     - `Infrastructure/Persistence/ControlPlaneDbContext.cs`
@@ -268,7 +268,7 @@
   - 完成标准：
     - 已注册全部控制面实体与索引/约束
 
-- [ ] T4.6 新增控制面设计时工厂
+- [x] T4.6 新增控制面设计时工厂
   - 依赖：T4.5
   - 产出物：
     - `Infrastructure/Persistence/ControlPlaneDesignTimeDbContextFactory.cs`
@@ -277,7 +277,7 @@
   - 完成标准：
     - 能正常生成和读取迁移
 
-- [ ] T4.7 生成控制面首个迁移
+- [x] T4.7 生成控制面首个迁移
   - 依赖：T4.6
   - 产出物：
     - `Infrastructure/Persistence/Migrations/*`
@@ -286,7 +286,7 @@
   - 完成标准：
     - 控制面迁移已生成且可编译
 
-- [ ] T4.8 在 `ApiService` 中注册 `ControlPlaneDbContext`
+- [x] T4.8 在 `ApiService` 中注册 `ControlPlaneDbContext`
   - 依赖：T4.7
   - 产出物：
     - `ApiService/Program.cs`
@@ -295,7 +295,7 @@
   - 完成标准：
     - API 启动时可解析控制面库上下文
 
-- [ ] T4.9 新增控制面自动迁移 HostedService
+- [x] T4.9 新增控制面自动迁移 HostedService
   - 依赖：T4.8
   - 产出物：
     - `ApiService/DatabaseMigrations/ControlPlaneMigrationHostedService.cs`
@@ -306,7 +306,7 @@
 
 ## 阶段 5：业务测试库 EF Core 模型
 
-- [ ] T5.1 新增 PostgreSQL 业务测试库实体映射
+- [x] T5.1 新增 PostgreSQL 业务测试库实体映射
   - 依赖：T2.6, T1.3
   - 产出物：
     - PostgreSQL 订单实体映射文件
@@ -315,7 +315,7 @@
   - 完成标准：
     - `orders` / `order_items` 结构与详细设计一致
 
-- [ ] T5.2 新增 MySQL 业务测试库实体映射
+- [x] T5.2 新增 MySQL 业务测试库实体映射
   - 依赖：T5.1
   - 产出物：
     - MySQL 订单实体映射文件
@@ -324,7 +324,7 @@
   - 完成标准：
     - `orders` / `order_items` 结构与详细设计一致
 
-- [ ] T5.3 新增 `PostgreSqlLabDbContext`
+- [x] T5.3 新增 `PostgreSqlLabDbContext`
   - 依赖：T5.1
   - 产出物：
     - `Infrastructure/Persistence/PostgreSqlLabDbContext.cs`
@@ -333,7 +333,7 @@
   - 完成标准：
     - PostgreSQL 业务测试库上下文可用
 
-- [ ] T5.4 新增 `MySqlLabDbContext`
+- [x] T5.4 新增 `MySqlLabDbContext`
   - 依赖：T5.2
   - 产出物：
     - `Infrastructure/Persistence/MySqlLabDbContext.cs`
@@ -342,7 +342,7 @@
   - 完成标准：
     - MySQL 业务测试库上下文可用
 
-- [ ] T5.5 新增 PostgreSQL 设计时工厂
+- [x] T5.5 新增 PostgreSQL 设计时工厂
   - 依赖：T5.3
   - 产出物：
     - `Infrastructure/Persistence/PostgreSqlLabDesignTimeDbContextFactory.cs`
@@ -351,7 +351,7 @@
   - 完成标准：
     - PostgreSQL 业务测试库迁移可生成
 
-- [ ] T5.6 新增 MySQL 设计时工厂
+- [x] T5.6 新增 MySQL 设计时工厂
   - 依赖：T5.4
   - 产出物：
     - `Infrastructure/Persistence/MySqlLabDesignTimeDbContextFactory.cs`
@@ -360,7 +360,7 @@
   - 完成标准：
     - MySQL 业务测试库迁移可生成
 
-- [ ] T5.7 生成 PostgreSQL 业务测试库首个迁移
+- [x] T5.7 生成 PostgreSQL 业务测试库首个迁移
   - 依赖：T5.5
   - 产出物：
     - PostgreSQL 业务测试库迁移文件
@@ -369,7 +369,7 @@
   - 完成标准：
     - PostgreSQL 业务测试库迁移已生成
 
-- [ ] T5.8 生成 MySQL 业务测试库首个迁移
+- [x] T5.8 生成 MySQL 业务测试库首个迁移
   - 依赖：T5.6
   - 产出物：
     - MySQL 业务测试库迁移文件
@@ -380,7 +380,7 @@
 
 ## 阶段 6：AppHost 数据库编排
 
-- [ ] T6.1 在 AppHost 中新增 PostgreSQL 控制面库
+- [x] T6.1 在 AppHost 中新增 PostgreSQL 控制面库
   - 依赖：T1.7
   - 产出物：
     - `AppHost.cs`
@@ -390,7 +390,7 @@
   - 完成标准：
     - PostgreSQL 控制面库资源已定义
 
-- [ ] T6.2 在 AppHost 中新增 PostgreSQL 业务测试库
+- [x] T6.2 在 AppHost 中新增 PostgreSQL 业务测试库
   - 依赖：T6.1
   - 产出物：
     - `AppHost.cs`
@@ -400,7 +400,7 @@
   - 完成标准：
     - PostgreSQL 业务测试库资源已定义
 
-- [ ] T6.3 在 AppHost 中新增 MySQL 业务测试库
+- [x] T6.3 在 AppHost 中新增 MySQL 业务测试库
   - 依赖：T6.2
   - 产出物：
     - `AppHost.cs`
@@ -410,7 +410,7 @@
   - 完成标准：
     - MySQL 业务测试库资源已定义
 
-- [ ] T6.4 在 AppHost 中接入 `DataInit` 项目
+- [x] T6.4 在 AppHost 中接入 `DataInit` 项目
   - 依赖：T1.7, T6.3
   - 产出物：
     - `AppHost.cs`
@@ -421,7 +421,7 @@
 
 ## 阶段 7：DataInit 项目骨架
 
-- [ ] T7.1 新增 `IDataInitializer` 抽象
+- [x] T7.1 新增 `IDataInitializer` 抽象
   - 依赖：T1.4
   - 产出物：
     - `DataInit/Abstractions/IDataInitializer.cs`
@@ -430,7 +430,7 @@
   - 完成标准：
     - PostgreSQL / MySQL 初始化器可复用统一接口
 
-- [ ] T7.2 新增 `InitializationStateService`
+- [x] T7.2 新增 `InitializationStateService`
   - 依赖：T4.4, T4.5, T7.1
   - 产出物：
     - `DataInit/Services/InitializationStateService.cs`
@@ -439,7 +439,7 @@
   - 完成标准：
     - 可读写初始化状态
 
-- [ ] T7.3 新增 `PostgreSqlLabInitializer`
+- [x] T7.3 新增 `PostgreSqlLabInitializer`
   - 依赖：T5.7, T7.2
   - 产出物：
     - `DataInit/Services/PostgreSqlLabInitializer.cs`
@@ -448,7 +448,7 @@
   - 完成标准：
     - PostgreSQL 初始化器骨架可运行
 
-- [ ] T7.4 新增 `MySqlLabInitializer`
+- [x] T7.4 新增 `MySqlLabInitializer`
   - 依赖：T5.8, T7.2
   - 产出物：
     - `DataInit/Services/MySqlLabInitializer.cs`
@@ -457,7 +457,7 @@
   - 完成标准：
     - MySQL 初始化器骨架可运行
 
-- [ ] T7.5 新增 `DataInitializationHostedService`
+- [x] T7.5 新增 `DataInitializationHostedService`
   - 依赖：T7.3, T7.4
   - 产出物：
     - `DataInit/HostedServices/DataInitializationHostedService.cs`
@@ -570,7 +570,7 @@
 
 ## 阶段 9：MCP 持久化与发现
 
-- [ ] T9.1 新增 `IMcpConnectionRepository`
+- [x] T9.1 新增 `IMcpConnectionRepository`
   - 依赖：T4.1, T1.2
   - 产出物：
     - `Application/Abstractions/Persistence/IMcpConnectionRepository.cs`
@@ -579,7 +579,7 @@
   - 完成标准：
     - 连接存取接口已定义
 
-- [ ] T9.2 新增 `IMcpToolRepository`
+- [x] T9.2 新增 `IMcpToolRepository`
   - 依赖：T4.2, T1.2
   - 产出物：
     - `Application/Abstractions/Persistence/IMcpToolRepository.cs`
@@ -588,7 +588,7 @@
   - 完成标准：
     - 工具存取接口已定义
 
-- [ ] T9.3 实现 `McpConnectionRepository`
+- [x] T9.3 实现 `McpConnectionRepository`
   - 依赖：T9.1, T4.5
   - 产出物：
     - `Infrastructure/Persistence/Repositories/McpConnectionRepository.cs`
@@ -597,7 +597,7 @@
   - 完成标准：
     - 连接可持久化读写
 
-- [ ] T9.4 实现 `McpToolRepository`
+- [x] T9.4 实现 `McpToolRepository`
   - 依赖：T9.2, T4.5
   - 产出物：
     - `Infrastructure/Persistence/Repositories/McpToolRepository.cs`
@@ -606,7 +606,7 @@
   - 完成标准：
     - 工具可持久化读写
 
-- [ ] T9.5 新增 MCP client 工厂
+- [x] T9.5 新增 MCP client / discovery 基础骨架
   - 依赖：T9.3, T9.4
   - 产出物：
     - `Infrastructure/Mcp/McpClientFactory.cs`
@@ -615,7 +615,7 @@
   - 完成标准：
     - 可基于连接配置创建 MCP client
 
-- [ ] T9.6 新增工具发现服务
+- [x] T9.6 新增工具发现服务
   - 依赖：T9.5
   - 产出物：
     - `Application/Mcp/Services/McpDiscoveryAppService.cs`
@@ -625,7 +625,7 @@
   - 完成标准：
     - 发现结果可映射并持久化
 
-- [ ] T9.7 写入默认 PostgreSQL / MySQL MCP 连接
+- [x] T9.7 写入默认 PostgreSQL / MySQL MCP 连接
   - 依赖：T9.3, T6.3
   - 产出物：
     - 默认连接种子逻辑
@@ -636,7 +636,7 @@
 
 ## 阶段 10：工具权限与执行
 
-- [ ] T10.1 新增工具执行服务接口
+- [x] T10.1 新增工具执行服务接口
   - 依赖：T9.4, T1.2
   - 产出物：
     - `Application/Abstractions/Mcp/IMcpToolExecutionService.cs`
@@ -645,7 +645,7 @@
   - 完成标准：
     - 工具执行抽象已定义
 
-- [ ] T10.2 实现工具执行服务
+- [x] T10.2 实现工具执行服务
   - 依赖：T10.1, T9.5
   - 产出物：
     - `Infrastructure/Mcp/McpToolExecutionService.cs`
@@ -654,7 +654,7 @@
   - 完成标准：
     - 工具执行结果可返回给上层
 
-- [ ] T10.3 落库工具执行记录
+- [x] T10.3 落库工具执行记录
   - 依赖：T10.2, T4.3
   - 产出物：
     - 执行记录持久化逻辑
@@ -663,7 +663,7 @@
   - 完成标准：
     - 成功/失败都能记录
 
-- [ ] T10.4 实现工具权限更新逻辑
+- [x] T10.4 实现工具权限更新逻辑
   - 依赖：T9.4, T3.2
   - 产出物：
     - `Application/Mcp/Services/McpToolPermissionAppService.cs`
@@ -672,7 +672,7 @@
   - 完成标准：
     - 前端修改权限枚举后可持久保存
 
-- [ ] T10.5 实现 Agent 工具装配服务
+- [x] T10.5 实现 Agent 工具装配服务
   - 依赖：T10.4
   - 产出物：
     - `Application/Mcp/Services/AgentToolAssemblyService.cs`
@@ -692,7 +692,7 @@
 
 ## 阶段 11：API 落地
 
-- [ ] T11.1 新增 MCP 连接查询接口
+- [x] T11.1 新增 MCP 连接查询接口
   - 依赖：T9.3, T4.9
   - 产出物：
     - `Api/McpApi.cs`
@@ -701,7 +701,7 @@
   - 完成标准：
     - 可返回连接列表
 
-- [ ] T11.2 新增 MCP 连接新增接口
+- [x] T11.2 新增 MCP 连接新增接口
   - 依赖：T11.1
   - 产出物：
     - `Api/McpApi.cs`
@@ -710,7 +710,7 @@
   - 完成标准：
     - 可创建连接配置
 
-- [ ] T11.3 新增 MCP 连接更新接口
+- [x] T11.3 新增 MCP 连接更新接口
   - 依赖：T11.2
   - 产出物：
     - `Api/McpApi.cs`
@@ -719,7 +719,7 @@
   - 完成标准：
     - 可更新连接配置
 
-- [ ] T11.4 新增工具发现接口
+- [x] T11.4 新增工具发现接口
   - 依赖：T9.6
   - 产出物：
     - `Api/McpApi.cs`
@@ -728,7 +728,7 @@
   - 完成标准：
     - 可触发工具发现
 
-- [ ] T11.5 新增工具列表接口
+- [x] T11.5 新增工具列表接口
   - 依赖：T11.4
   - 产出物：
     - `Api/McpApi.cs`
@@ -737,7 +737,7 @@
   - 完成标准：
     - 可返回工具列表
 
-- [ ] T11.6 新增工具权限更新接口
+- [x] T11.6 新增工具权限更新接口
   - 依赖：T10.4
   - 产出物：
     - `Api/McpApi.cs`
@@ -746,7 +746,7 @@
   - 完成标准：
     - 可更新工具权限
 
-- [ ] T11.7 新增工具执行接口
+- [x] T11.7 新增工具执行接口
   - 依赖：T10.3
   - 产出物：
     - `Api/McpApi.cs`
@@ -755,7 +755,7 @@
   - 完成标准：
     - 可执行工具并返回结果
 
-- [ ] T11.8 新增执行记录查询接口
+- [x] T11.8 新增执行记录查询接口
   - 依赖：T10.3
   - 产出物：
     - `Api/McpApi.cs`
@@ -764,7 +764,7 @@
   - 完成标准：
     - 可查询执行记录
 
-- [ ] T11.9 新增初始化状态接口
+- [x] T11.9 新增初始化状态接口
   - 依赖：T7.5, T8.11
   - 产出物：
     - `Api/DataInitializationApi.cs`
@@ -775,7 +775,7 @@
 
 ## 阶段 12：前端 MCP 管理页
 
-- [ ] T12.1 新增前端 MCP 数据模型
+- [x] T12.1 新增前端 MCP 数据模型
   - 依赖：T11.1
   - 产出物：
     - `Web/src/models/mcp.ts`
@@ -784,7 +784,7 @@
   - 完成标准：
     - 前端类型与 API 返回结构对齐
 
-- [ ] T12.2 新增前端 MCP API 封装
+- [x] T12.2 新增前端 MCP API 封装
   - 依赖：T12.1
   - 产出物：
     - `Web/src/api/mcp.ts`
@@ -793,7 +793,7 @@
   - 完成标准：
     - 前端具备 MCP 页面所需调用封装
 
-- [ ] T12.3 新增连接表格组件
+- [x] T12.3 新增连接表格组件
   - 依赖：T12.2
   - 产出物：
     - `Web/src/components/mcp/McpConnectionTable.vue`
@@ -802,7 +802,7 @@
   - 完成标准：
     - 可展示默认 PostgreSQL / MySQL MCP 连接
 
-- [ ] T12.4 新增工具表格组件
+- [x] T12.4 新增工具表格组件
   - 依赖：T12.2
   - 产出物：
     - `Web/src/components/mcp/McpToolTable.vue`
@@ -811,7 +811,7 @@
   - 完成标准：
     - 可展示工具列表和权限枚举
 
-- [ ] T12.5 新增通用工具执行器组件
+- [x] T12.5 新增通用工具执行器组件
   - 依赖：T12.2
   - 产出物：
     - `Web/src/components/mcp/McpToolExecutor.vue`
@@ -820,7 +820,7 @@
   - 完成标准：
     - 可输入 JSON 参数并执行工具
 
-- [ ] T12.6 新增初始化状态面板组件
+- [x] T12.6 新增初始化状态面板组件
   - 依赖：T11.9
   - 产出物：
     - `Web/src/components/mcp/DataInitStatusPanel.vue`
@@ -829,7 +829,7 @@
   - 完成标准：
     - 可展示 PostgreSQL / MySQL 初始化状态
 
-- [ ] T12.7 新增 MCP 管理页
+- [x] T12.7 新增 MCP 管理页
   - 依赖：T12.3, T12.4, T12.5, T12.6
   - 产出物：
     - `Web/src/pages/mcp/McpManagementPage.vue`
@@ -838,7 +838,7 @@
   - 完成标准：
     - 页面包含连接、工具、执行器、初始化状态四个区块
 
-- [ ] T12.8 在首页加入 MCP 管理页入口
+- [x] T12.8 在首页加入 MCP 管理页入口
   - 依赖：T12.7
   - 产出物：
     - `Web/src/App.vue`
@@ -849,7 +849,7 @@
 
 ## 阶段 13：集成验证
 
-- [ ] T13.1 解决方案编译通过
+- [x] T13.1 解决方案编译通过
   - 依赖：T12.8
   - 产出物：无
   - 验证：
@@ -857,7 +857,7 @@
   - 完成标准：
     - 所有 .NET 项目编译通过
 
-- [ ] T13.2 前端编译通过
+- [x] T13.2 前端编译通过
   - 依赖：T12.8
   - 产出物：无
   - 验证：
@@ -865,7 +865,7 @@
   - 完成标准：
     - 前端打包通过
 
-- [ ] T13.3 Aspire 启动后控制面库迁移成功
+- [x] T13.3 Aspire 启动后控制面库迁移成功
   - 依赖：T13.1
   - 产出物：无
   - 验证：
@@ -873,7 +873,7 @@
   - 完成标准：
     - 控制面库可自动迁移
 
-- [ ] T13.4 Aspire 启动后 PostgreSQL / MySQL 业务测试库迁移成功
+- [x] T13.4 Aspire 启动后 PostgreSQL / MySQL 业务测试库迁移成功
   - 依赖：T13.3
   - 产出物：无
   - 验证：
@@ -905,7 +905,7 @@
   - 完成标准：
     - 默认 PostgreSQL / MySQL 连接均可见
 
-- [ ] T13.8 点击“获取工具”可拉取 PostgreSQL / MySQL 工具
+- [x] T13.8 点击“获取工具”可拉取 PostgreSQL / MySQL 工具
   - 依赖：T13.7
   - 产出物：无
   - 验证：
@@ -913,7 +913,7 @@
   - 完成标准：
     - 工具列表可展示并落库
 
-- [ ] T13.9 通用工具执行器可执行插入类工具
+- [x] T13.9 通用工具执行器可执行只读工具
   - 依赖：T13.8
   - 产出物：无
   - 验证：

@@ -34,7 +34,8 @@ var postgres = builder.AddPostgres(
         pgAdmin.WithLifetime(ContainerLifetime.Persistent);
     });
 
-var postgresDb = postgres.AddDatabase("postgresdb", settings.Infrastructure.PostgreSql.Database);
+var controlPlaneDb = postgres.AddDatabase("aidbopt-control", settings.Infrastructure.PostgreSql.ControlPlaneDatabase);
+var postgreSqlLabDb = postgres.AddDatabase("aidbopt-lab-pg", settings.Infrastructure.PostgreSql.LabDatabase);
 
 // MySQL：固定端口 + 数据卷 + phpMyAdmin。
 var mySql = builder.AddMySql(
@@ -49,7 +50,7 @@ var mySql = builder.AddMySql(
         phpMyAdmin.WithLifetime(ContainerLifetime.Persistent);
     });
 
-var mySqlDb = mySql.AddDatabase("mysqldb", settings.Infrastructure.MySql.Database);
+var mySqlLabDb = mySql.AddDatabase("aidbopt-lab-mysql", settings.Infrastructure.MySql.LabDatabase);
 
 // Redis：固定端口 + 数据卷 + Redis Insight。
 var redis = builder.AddRedis("redis", settings.Infrastructure.Redis.Port)
@@ -81,14 +82,28 @@ var api = builder.AddProject<Projects.AIDbOptimize_ApiService>("api", options =>
         port: settings.Endpoints.ApiPort,
         name: "http")
     .WithExternalHttpEndpoints()
-    .WaitFor(postgresDb)
-    .WaitFor(mySqlDb)
+    .WaitFor(controlPlaneDb)
+    .WaitFor(postgreSqlLabDb)
+    .WaitFor(mySqlLabDb)
     .WaitFor(redis)
     .WaitFor(rabbitMq)
-    .WithReference(postgresDb)
-    .WithReference(mySqlDb)
+    .WithReference(controlPlaneDb)
+    .WithReference(postgreSqlLabDb)
+    .WithReference(mySqlLabDb)
     .WithReference(redis)
     .WithReference(rabbitMq);
+
+// 数据初始化项目负责业务测试库的迁移与首轮种子初始化。
+builder.AddProject<Projects.AIDbOptimize_DataInit>("data-init", options =>
+    {
+        options.ExcludeLaunchProfile = true;
+    })
+    .WaitFor(controlPlaneDb)
+    .WaitFor(postgreSqlLabDb)
+    .WaitFor(mySqlLabDb)
+    .WithReference(controlPlaneDb)
+    .WithReference(postgreSqlLabDb)
+    .WithReference(mySqlLabDb);
 
 // 前端也交给 Aspire 托管，并显式要求启动前执行 npm install。
 // 这里使用 AddJavaScriptApp + WithRunScript，而不是 AddViteApp，
@@ -127,5 +142,5 @@ static string BuildLocalUrl(int port)
 {
     // 管理面板统一使用显式 HTTP，并改用 127.0.0.1，
     // 避免部分浏览器对 localhost 做 HTTPS-First / 自动升级后打不开。
-    return $"https://127.0.0.1:{port.ToString(CultureInfo.InvariantCulture)}/";
+    return $"http://127.0.0.1:{port.ToString(CultureInfo.InvariantCulture)}/";
 }

@@ -1,4 +1,15 @@
 using System.Text.RegularExpressions;
+using AIDbOptimize.ApiService.Api;
+using AIDbOptimize.ApiService.DatabaseMigrations;
+using AIDbOptimize.Application.Abstractions.Agents;
+using AIDbOptimize.Application.Abstractions.Mcp;
+using AIDbOptimize.Application.Abstractions.Persistence;
+using AIDbOptimize.Application.DataInitialization.Services;
+using AIDbOptimize.Application.Mcp.Services;
+using AIDbOptimize.Infrastructure.Mcp;
+using AIDbOptimize.Infrastructure.Persistence;
+using AIDbOptimize.Infrastructure.Persistence.Repositories;
+using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -6,8 +17,27 @@ var builder = WebApplication.CreateBuilder(args);
 // 1. 提供健康检查，确认 Aspire 编排的 API 已成功启动；
 // 2. 返回 Aspire 注入的基础设施连接状态，给首页做可视化展示；
 // 3. 暴露 Swagger，方便后续继续扩展接口时直接调试。
+var controlPlaneConnectionString = ResolveConnectionString(
+    builder.Configuration,
+    "aidbopt-control",
+    "ControlPlane",
+    "Host=localhost;Port=15432;Username=postgres;Password=Postgres123!;Database=aidbopt_control");
+
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
+builder.Services.AddDbContextFactory<ControlPlaneDbContext>(options =>
+    options.UseNpgsql(controlPlaneConnectionString));
+builder.Services.AddHostedService<ControlPlaneMigrationHostedService>();
+builder.Services.AddHostedService<ControlPlaneDefaultSeedHostedService>();
+builder.Services.AddScoped<IMcpConnectionRepository, McpConnectionRepository>();
+builder.Services.AddScoped<IMcpToolRepository, McpToolRepository>();
+builder.Services.AddScoped<IDataInitializationRunRepository, DataInitializationRunRepository>();
+builder.Services.AddScoped<IMcpDiscoveryService, McpDiscoveryService>();
+builder.Services.AddScoped<IMcpToolExecutionService, McpToolExecutionService>();
+builder.Services.AddScoped<McpDiscoveryAppService>();
+builder.Services.AddScoped<McpToolPermissionAppService>();
+builder.Services.AddScoped<InitializationStatusAppService>();
+builder.Services.AddScoped<IAgentToolAssemblyService, AgentToolAssemblyService>();
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("frontend-dev", policy =>
@@ -64,6 +94,9 @@ app.MapGet("/api/infrastructure", (IConfiguration configuration, IWebHostEnviron
 .WithSummary("返回 Aspire 注入的基础设施连接状态。")
 .WithDescription("用于前端首页展示当前示例项目的基础设施接入情况。");
 
+app.MapMcpApi();
+app.MapDataInitializationApi();
+
 app.Run();
 
 return;
@@ -101,6 +134,17 @@ static string MaskConnectionString(string? value)
         "$1***$3");
 
     return masked;
+}
+
+static string ResolveConnectionString(
+    IConfiguration configuration,
+    string aspireName,
+    string fallbackName,
+    string defaultValue)
+{
+    return configuration.GetConnectionString(aspireName)
+        ?? configuration.GetConnectionString(fallbackName)
+        ?? defaultValue;
 }
 
 internal sealed record InfrastructureOverviewResponse(
