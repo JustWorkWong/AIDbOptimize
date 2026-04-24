@@ -22,21 +22,24 @@ builder.Services.AddLogging(logging =>
 });
 
 // 当前先通过连接字符串完成最小接线。
-// 后续随着 AppHost 集成增强，可以继续补充强类型配置绑定。
+// 优先读取 Aspire 注入连接，缺省时回落本地开发默认值，便于单独调试 DataInit。
 var controlPlaneConnection = GetRequiredConnectionString(
     builder.Configuration,
     "aidbopt-control",
-    "ControlPlane");
+    "ControlPlane",
+    "Host=127.0.0.1;Port=15432;Username=postgres;Password=Postgres123!;Database=aidbopt_control");
 
 var postgreSqlLabConnection = GetRequiredConnectionString(
     builder.Configuration,
     "aidbopt-lab-pg",
-    "PostgreSqlLab");
+    "PostgreSqlLab",
+    "Host=127.0.0.1;Port=15432;Username=postgres;Password=Postgres123!;Database=aidbopt_lab_pg");
 
 var mySqlLabConnection = GetRequiredConnectionString(
     builder.Configuration,
     "aidbopt-lab-mysql",
-    "MySqlLab");
+    "MySqlLab",
+    "Server=127.0.0.1;Port=13306;User ID=root;Password=MySql123!;Database=aidbopt_lab_mysql");
 
 builder.Services.AddDbContextFactory<ControlPlaneDbContext>(options =>
     options.UseNpgsql(controlPlaneConnection));
@@ -56,16 +59,16 @@ await builder.Build().RunAsync();
 return;
 
 /// <summary>
-/// 从配置中解析必填连接串。
-/// 优先读取 Aspire 注入的连接名称，再读取本地备用名称。
+/// 解析必填连接串。
+/// 优先读取 Aspire 注入的连接名称，再读取本地备用名称，最后回落默认值。
 /// </summary>
 static string GetRequiredConnectionString(
     IConfiguration configuration,
     string primaryName,
-    string secondaryName)
+    string secondaryName,
+    string defaultValue)
 {
     return configuration.GetConnectionString(primaryName)
         ?? configuration.GetConnectionString(secondaryName)
-        ?? throw new InvalidOperationException(
-            $"缺少连接串：{primaryName}/{secondaryName}。请先完成 AppHost 与 DataInit 的连接配置。");
+        ?? defaultValue;
 }

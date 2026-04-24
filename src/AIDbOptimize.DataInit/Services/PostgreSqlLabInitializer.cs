@@ -24,14 +24,14 @@ public sealed class PostgreSqlLabInitializer(
 
     /// <summary>
     /// 应用 PostgreSQL 业务测试库迁移。
-    /// 当前返回 false，表示真实数据种子尚未在迁移中落地。
+    /// 当前版本的业务测试数据已经下沉到迁移文件中，因此迁移成功即可视为初始化完成。
     /// </summary>
     public async Task<bool> InitializeAsync(CancellationToken cancellationToken = default)
     {
         await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         await dbContext.Database.MigrateAsync(cancellationToken);
 
-        logger.LogInformation("PostgreSQL 业务测试库迁移已完成，待后续补充 10w 级种子迁移。");
-        return false;
+        logger.LogInformation("PostgreSQL 业务测试库迁移与 10w 级种子已完成。");
+        return true;
     }
 }

@@ -50,22 +50,6 @@ public sealed class DataInitializationHostedService(
     /// </summary>
     private async Task ExecuteInitializerAsync(IDataInitializer initializer, CancellationToken cancellationToken)
     {
-        var latest = await initializationStateService.GetLatestAsync(
-            initializer.Engine,
-            initializer.DatabaseName,
-            initializer.SeedVersion,
-            cancellationToken);
-
-        if (latest?.State == DataInitializationState.Completed)
-        {
-            logger.LogInformation(
-                "{Engine} 在 {DatabaseName} 的种子版本 {SeedVersion} 已完成，跳过重复初始化。",
-                initializer.Engine,
-                initializer.DatabaseName,
-                initializer.SeedVersion);
-            return;
-        }
-
         var run = await initializationStateService.MarkInProgressAsync(
             initializer.Engine,
             initializer.DatabaseName,

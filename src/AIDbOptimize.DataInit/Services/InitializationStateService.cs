@@ -41,18 +41,29 @@ public sealed class InitializationStateService(IDbContextFactory<ControlPlaneDbC
     {
         await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
 
-        var entity = new DataInitializationRunEntity
-        {
-            Id = Guid.NewGuid(),
-            Engine = engine,
-            DatabaseName = databaseName,
-            SeedVersion = seedVersion,
-            TargetOrderCount = targetOrderCount,
-            State = DataInitializationState.InProgress,
-            StartedAt = DateTimeOffset.UtcNow
-        };
+        var entity = await dbContext.DataInitializationRuns.FirstOrDefaultAsync(
+            x => x.Engine == engine && x.DatabaseName == databaseName && x.SeedVersion == seedVersion,
+            cancellationToken);
 
-        dbContext.DataInitializationRuns.Add(entity);
+        if (entity is null)
+        {
+            entity = new DataInitializationRunEntity
+            {
+                Id = Guid.NewGuid(),
+                Engine = engine,
+                DatabaseName = databaseName,
+                SeedVersion = seedVersion
+            };
+
+            dbContext.DataInitializationRuns.Add(entity);
+        }
+
+        entity.TargetOrderCount = targetOrderCount;
+        entity.State = DataInitializationState.InProgress;
+        entity.StartedAt = DateTimeOffset.UtcNow;
+        entity.CompletedAt = null;
+        entity.ErrorMessage = null;
+
         await dbContext.SaveChangesAsync(cancellationToken);
         return entity;
     }

@@ -95,7 +95,7 @@
 
 ## 阶段 8：10w 级测试数据初始化
 
-- [ ] T8.1 将 PostgreSQL 造数下沉到 EF Core 迁移 SQL
+- [x] T8.1 将 PostgreSQL 造数下沉到 EF Core 迁移 SQL
   - 依赖：T5.7
   - 产出物：
     - `PostgreSqlLab` 新迁移文件
@@ -104,7 +104,7 @@
   - 完成标准：
     - PostgreSQL 迁移中包含订单与明细的批量造数 SQL
 
-- [ ] T8.2 将 MySQL 造数下沉到 EF Core 迁移 SQL
+- [x] T8.2 将 MySQL 造数下沉到 EF Core 迁移 SQL
   - 依赖：T5.8
   - 产出物：
     - `MySqlLab` 新迁移文件
@@ -113,7 +113,7 @@
   - 完成标准：
     - MySQL 迁移中包含订单与明细的批量造数 SQL
 
-- [ ] T8.3 将目标规模统一为 `10w`
+- [x] T8.3 将目标规模统一为 `10w`
   - 依赖：T8.1, T8.2
   - 产出物：
     - 迁移 SQL
@@ -123,7 +123,7 @@
   - 完成标准：
     - PostgreSQL / MySQL 目标规模都为 10w
 
-- [ ] T8.4 修正 `DataInit` 状态逻辑
+- [x] T8.4 修正 `DataInit` 状态逻辑
   - 依赖：T8.1, T8.2
   - 产出物：
     - `DataInitializationHostedService.cs`
@@ -134,21 +134,21 @@
   - 完成标准：
     - 未完成造数时不会被错误标记为 `Completed`
 
-- [ ] T8.5 首次启动完成 PostgreSQL 10w 数据灌库
+- [x] T8.5 首次启动完成 PostgreSQL 10w 数据灌库
   - 依赖：T8.4
   - 验证：
     - PostgreSQL 订单量检查
   - 完成标准：
     - PostgreSQL 达到目标订单量
 
-- [ ] T8.6 首次启动完成 MySQL 10w 数据灌库
+- [x] T8.6 首次启动完成 MySQL 10w 数据灌库
   - 依赖：T8.4
   - 验证：
     - MySQL 订单量检查
   - 完成标准：
     - MySQL 达到目标订单量
 
-- [ ] T8.7 二次启动验证幂等跳过
+- [x] T8.7 二次启动验证幂等跳过
   - 依赖：T8.5, T8.6
   - 验证：
     - 二次启动日志
@@ -274,8 +274,8 @@
 - [x] T13.3 Aspire 启动后控制面库迁移成功
 - [x] T13.4 Aspire 启动后 PostgreSQL / MySQL 业务测试库迁移成功
 
-- [ ] T13.5 首次启动完成 10w 数据灌库
-- [ ] T13.6 二次启动验证幂等跳过
+- [x] T13.5 首次启动完成 10w 数据灌库
+- [x] T13.6 二次启动验证幂等跳过
 
 - [ ] T13.7 前端默认 MCP 连接可见
   - 依赖：T13.3, T12.8
