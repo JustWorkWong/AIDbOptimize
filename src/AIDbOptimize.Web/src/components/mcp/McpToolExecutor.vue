@@ -8,7 +8,7 @@ const props = defineProps<{
 }>()
 
 const selectedToolId = ref('')
-const payloadJson = ref('{\n  "sql": "SELECT 1"\n}')
+const payloadJson = ref('{\n  "sql": "SELECT 1 AS value"\n}')
 const executing = ref(false)
 const executionResult = ref('')
 const executionError = ref('')

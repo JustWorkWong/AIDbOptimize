@@ -13,10 +13,10 @@ using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// 这个最小 API 只做三件事：
-// 1. 提供健康检查，确认 Aspire 编排的 API 已成功启动；
-// 2. 返回 Aspire 注入的基础设施连接状态，给首页做可视化展示；
-// 3. 暴露 Swagger，方便后续继续扩展接口时直接调试。
+// 这个最小 API 当前主要承担三类职责：
+// 1. 公开健康检查与基础设施状态；
+// 2. 公开控制面 MCP 管理接口；
+// 3. 负责控制面数据库迁移和默认连接种子。
 var controlPlaneConnectionString = ResolveConnectionString(
     builder.Configuration,
     "aidbopt-control",
@@ -25,10 +25,13 @@ var controlPlaneConnectionString = ResolveConnectionString(
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
+
 builder.Services.AddDbContextFactory<ControlPlaneDbContext>(options =>
     options.UseNpgsql(controlPlaneConnectionString));
+
 builder.Services.AddHostedService<ControlPlaneMigrationHostedService>();
 builder.Services.AddHostedService<ControlPlaneDefaultSeedHostedService>();
+
 builder.Services.AddScoped<IMcpConnectionRepository, McpConnectionRepository>();
 builder.Services.AddScoped<IMcpToolRepository, McpToolRepository>();
 builder.Services.AddScoped<IDataInitializationRunRepository, DataInitializationRunRepository>();
@@ -38,6 +41,7 @@ builder.Services.AddScoped<McpDiscoveryAppService>();
 builder.Services.AddScoped<McpToolPermissionAppService>();
 builder.Services.AddScoped<InitializationStatusAppService>();
 builder.Services.AddScoped<IAgentToolAssemblyService, AgentToolAssemblyService>();
+
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("frontend-dev", policy =>
@@ -75,9 +79,8 @@ app.MapGet("/health", () => Results.Ok(new
 
 app.MapGet("/api/infrastructure", (IConfiguration configuration, IWebHostEnvironment environment) =>
 {
-    // Aspire 会把 WithReference 的结果注入成连接字符串。
-    // 这里不直接连接数据库，只返回“是否已注入连接字符串”和脱敏预览，
-    // 既能满足首页展示，也能避免把默认密码直接暴露给前端。
+    // 这里只返回“连接串是否已注入”和脱敏预览，
+    // 避免把默认密码直接暴露给前端页面。
     var response = new InfrastructureOverviewResponse(
         EnvironmentName: environment.EnvironmentName,
         Services:
@@ -101,6 +104,9 @@ app.Run();
 
 return;
 
+/// <summary>
+/// 构造单个基础设施资源的状态展示模型。
+/// </summary>
 static ServiceStatusResponse BuildServiceStatus(
     string displayName,
     string connectionStringName,
@@ -115,6 +121,9 @@ static ServiceStatusResponse BuildServiceStatus(
         Preview: MaskConnectionString(raw));
 }
 
+/// <summary>
+/// 对连接串做轻量脱敏，避免把默认密码直接回传到前端。
+/// </summary>
 static string MaskConnectionString(string? value)
 {
     if (string.IsNullOrWhiteSpace(value))
@@ -122,7 +131,6 @@ static string MaskConnectionString(string? value)
         return "未注入";
     }
 
-    // 这里做轻量级脱敏，避免把本地开发密码直接返回给前端页面。
     var masked = Regex.Replace(
         value,
         "(?i)(password|pwd)=([^;]+)",
@@ -136,6 +144,9 @@ static string MaskConnectionString(string? value)
     return masked;
 }
 
+/// <summary>
+/// 解析必填连接串。
+/// </summary>
 static string ResolveConnectionString(
     IConfiguration configuration,
     string aspireName,

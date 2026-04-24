@@ -1,16 +1,16 @@
+using System.Text.Json;
+using AIDbOptimize.Application.Abstractions.Mcp;
+using AIDbOptimize.Application.Abstractions.Persistence;
 using AIDbOptimize.Application.Mcp.Services;
 using AIDbOptimize.Domain.Mcp.Enums;
-using AIDbOptimize.Application.Abstractions.Persistence;
-using AIDbOptimize.Application.Abstractions.Mcp;
 using AIDbOptimize.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
-using System.Text.Json;
 
 namespace AIDbOptimize.ApiService.Api;
 
 /// <summary>
 /// MCP 管理 API。
-/// 当前先提供连接查询、工具查询、工具发现和权限更新的最小骨架。
+/// 当前提供连接查询、连接编辑、工具发现、工具执行和审批模式更新的最小可运行接口。
 /// </summary>
 internal static class McpApiRouteBuilderExtensions
 {
@@ -30,6 +30,9 @@ internal static class McpApiRouteBuilderExtensions
         return endpoints;
     }
 
+    /// <summary>
+    /// 查询全部连接配置。
+    /// </summary>
     private static async Task<IResult> HandleGetConnectionsAsync(
         McpDiscoveryAppService appService,
         CancellationToken cancellationToken)
@@ -38,6 +41,9 @@ internal static class McpApiRouteBuilderExtensions
         return Results.Ok(result);
     }
 
+    /// <summary>
+    /// 新增连接配置。
+    /// </summary>
     private static async Task<IResult> HandleCreateConnectionAsync(
         UpsertConnectionRequest request,
         IMcpConnectionRepository repository,
@@ -49,6 +55,9 @@ internal static class McpApiRouteBuilderExtensions
         return Results.Ok(new { record.Id });
     }
 
+    /// <summary>
+    /// 更新连接配置。
+    /// </summary>
     private static async Task<IResult> HandleUpdateConnectionAsync(
         Guid connectionId,
         UpsertConnectionRequest request,
@@ -67,6 +76,9 @@ internal static class McpApiRouteBuilderExtensions
         return Results.Ok(new { updated.Id });
     }
 
+    /// <summary>
+    /// 查询连接下的工具列表。
+    /// </summary>
     private static async Task<IResult> HandleGetToolsAsync(
         Guid connectionId,
         McpDiscoveryAppService appService,
@@ -76,6 +88,9 @@ internal static class McpApiRouteBuilderExtensions
         return Results.Ok(result);
     }
 
+    /// <summary>
+    /// 触发工具发现。
+    /// </summary>
     private static async Task<IResult> HandleDiscoverToolsAsync(
         Guid connectionId,
         McpDiscoveryAppService appService,
@@ -85,6 +100,9 @@ internal static class McpApiRouteBuilderExtensions
         return Results.Ok(result);
     }
 
+    /// <summary>
+    /// 更新工具审批模式。
+    /// </summary>
     private static async Task<IResult> HandleUpdateApprovalModeAsync(
         Guid toolId,
         UpdateApprovalModeRequest request,
@@ -99,6 +117,9 @@ internal static class McpApiRouteBuilderExtensions
         });
     }
 
+    /// <summary>
+    /// 执行指定工具。
+    /// </summary>
     private static async Task<IResult> HandleExecuteToolAsync(
         Guid toolId,
         ExecuteToolRequest request,
@@ -110,6 +131,9 @@ internal static class McpApiRouteBuilderExtensions
         return Results.Ok(result);
     }
 
+    /// <summary>
+    /// 查询最近的工具执行记录。
+    /// </summary>
     private static async Task<IResult> HandleGetExecutionsAsync(
         IDbContextFactory<ControlPlaneDbContext> dbContextFactory,
         CancellationToken cancellationToken)

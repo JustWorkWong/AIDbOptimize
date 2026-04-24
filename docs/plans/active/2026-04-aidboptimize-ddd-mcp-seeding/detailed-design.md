@@ -4,26 +4,26 @@
 > `design.md` 用于描述总体目标与架构方向。  
 > 本文档用于提供后续 agent 可直接落地的详细设计，包括包依赖、项目结构、数据结构、接口、页面草图、类设计和关键伪代码。
 
-## 1. 实现目标
+## 1. 当前实现状态与目标边界
 
-本阶段要交付一套可运行的“控制面 + 业务测试库 + MCP 管理 + Agent 工具审核适配”架构。
+### 1.1 已经完成的部分
 
-核心能力固定为：
+- 解决方案已拆出 `Domain / Application / Infrastructure / DataInit`
+- 订单域基础模型已具备
+- 控制面数据库 `DbContext`、实体、仓储骨架已存在
+- 控制面、PostgreSQL 业务测试库、MySQL 业务测试库三套迁移已生成
+- 前端已有最小 MCP 管理视图
+- API 已暴露 MCP 连接、工具、审批模式、执行记录、初始化状态等基础接口
 
-1. 使用 DDD 分层承载订单域
-2. PostgreSQL 与 MySQL 使用相同的订单 / 订单明细模型
-3. 新增测试数据初始化项目，在 Aspire 启动时自动执行
-4. 使用 EF Core Code First 自动迁移
-5. 首次启动时对 PostgreSQL / MySQL 业务测试库分别生成 1000 万级订单与订单明细数据
-6. 数据初始化具备幂等能力：完成后再次启动直接跳过
-7. 前端提供 MCP 管理页，默认带好 PostgreSQL / MySQL MCP 连接
-8. 前端可点击“获取工具”，拉取并配置工具权限枚举
-9. 前端可通过通用工具执行器执行插入类工具
-10. Agent 场景下，对标记为 `ApprovalRequired` 的工具使用 `ApprovalRequiredAIFunction`
+### 1.2 仍未完成的部分
+
+- `DataInit` 仍未真正生成订单测试数据
+- 测试数据规模目标已调整为 `10w` 级别
+- 测试数据应通过 **EF Core 迁移内 SQL** 完成，而不是由运行时服务手写插入
+- 当前 MCP 发现/执行仍是最小骨架，不是真实 `tools/list / tools/call`
+- `ApprovalRequiredAIFunction` 还未真正接入 Agent 工具装配
 
 ## 2. 解决方案结构
-
-建议解决方案扩展为：
 
 ```text
 E:\Db
@@ -45,9 +45,9 @@ E:\Db
 └─ AIDbOptimize.slnx
 ```
 
-### 2.1 项目职责
+## 3. 项目职责
 
-#### `AIDbOptimize.Domain`
+### `AIDbOptimize.Domain`
 
 只放纯领域对象，不依赖 EF Core、MCP、Web。
 
@@ -80,94 +80,62 @@ Domain/
       └─ DataInitializationState.cs
 ```
 
-#### `AIDbOptimize.Application`
+### `AIDbOptimize.Application`
 
 负责“用例编排”，不直接关心具体数据库驱动或 MCP 实现细节。
 
-建议目录：
-
-```text
-Application/
-├─ Orders/
-│  ├─ Commands/
-│  ├─ Queries/
-│  └─ Services/
-├─ Mcp/
-│  ├─ Dtos/
-│  ├─ Commands/
-│  ├─ Queries/
-│  └─ Services/
-├─ DataInitialization/
-│  ├─ Dtos/
-│  └─ Services/
-└─ Abstractions/
-   ├─ Persistence/
-   ├─ Mcp/
-   └─ Agents/
-```
-
-#### `AIDbOptimize.Infrastructure`
+### `AIDbOptimize.Infrastructure`
 
 负责：
 
 - EF Core `DbContext`
 - 实体映射
 - 迁移
-- SQL 批量造数实现
-- MCP client / server 启动适配
 - 仓储实现
+- 真实 MCP client/session 调用适配
 
-#### `AIDbOptimize.ApiService`
+### `AIDbOptimize.ApiService`
 
 负责：
 
 - HTTP API 暴露
 - 控制面数据库自动迁移
-- 应用服务注册
+- 默认 MCP 连接种子
 
-#### `AIDbOptimize.DataInit`
-
-负责：
-
-- PostgreSQL / MySQL 业务测试库迁移
-- 幂等检测
-- 大规模数据初始化
-- 初始化状态落库
-
-#### `AIDbOptimize.AppHost`
+### `AIDbOptimize.DataInit`
 
 负责：
 
-- PostgreSQL / MySQL / Redis / RabbitMQ 编排
-- 新增业务测试库引用
-- 启动 `ApiService`
-- 启动 `Web`
-- 启动 `DataInit`
+- 业务测试库 `MigrateAsync`
+- 初始化状态可视化
+- 触发业务测试库迁移中的数据种子执行
 
-#### `AIDbOptimize.Web`
+> 重要约束  
+> `DataInit` 本身不应再手写“大批量插入 SQL”。  
+> 真实造数 SQL 应写在 EF Core 迁移中，由 `MigrateAsync()` 执行。
+
+### `AIDbOptimize.Web`
 
 负责：
 
-- 现有首页保留
-- 新增 MCP 管理页
+- 资源概览
+- MCP 管理视图
 
-## 3. NuGet / npm 包设计
+当前实现是 `App.vue` 内部的视图切换，不是独立路由页。
 
-### 3.1 .NET 包
+## 4. 包设计
+
+### 4.1 .NET 包
 
 #### `AIDbOptimize.Domain`
 
-不新增第三方包。
+- 无额外第三方包
 
 #### `AIDbOptimize.Application`
-
-建议包：
 
 - `FluentValidation`
 
 #### `AIDbOptimize.Infrastructure`
-
-建议包：
 
 - `Microsoft.EntityFrameworkCore`
 - `Microsoft.EntityFrameworkCore.Design`
@@ -176,23 +144,14 @@ Application/
 - `MySqlConnector`
 - `Npgsql`
 - `ModelContextProtocol`
-- `Microsoft.Extensions.Hosting.Abstractions`
-
-如果 Agent 包装层放在这里，还需要：
-
-- `Microsoft.Extensions.AI`
-- 与 `ApprovalRequiredAIFunction` 所属命名空间一致的相关包
 
 #### `AIDbOptimize.ApiService`
 
-建议包：
-
 - `Swashbuckle.AspNetCore`
-- `FluentValidation.DependencyInjectionExtensions`
+- `Microsoft.EntityFrameworkCore`
+- `Microsoft.EntityFrameworkCore.Design`
 
 #### `AIDbOptimize.DataInit`
-
-建议包：
 
 - `Microsoft.Extensions.Hosting`
 - `Microsoft.Extensions.Logging.Console`
@@ -200,36 +159,22 @@ Application/
 - `Npgsql.EntityFrameworkCore.PostgreSQL`
 - `Pomelo.EntityFrameworkCore.MySql`
 
-#### `AIDbOptimize.AppHost`
+#### Agent 相关
 
-保留并扩展：
+后续真正接入 `ApprovalRequiredAIFunction` 时，还需要：
 
-- `Aspire.Hosting.JavaScript`
-- `Aspire.Hosting.PostgreSQL`
-- `Aspire.Hosting.MySql`
-- `Aspire.Hosting.Redis`
-- `Aspire.Hosting.RabbitMQ`
+- `Microsoft.Extensions.AI`
+- `ApprovalRequiredAIFunction` 对应包
 
-### 3.2 前端包
+## 5. 数据库设计
 
-当前前端保持轻量，建议新增：
+## 5.1 控制面数据库
 
-- 不强制增加 UI 框架
-- 若需要更稳定的 JSON 编辑体验，可加：
-  - `zod`
-  - `@vueuse/core`
-
-首版不建议引入重型组件库，避免页面管理台复杂化。
-
-## 4. 数据库设计
-
-### 4.1 控制面数据库
-
-控制面数据库使用 PostgreSQL，建议库名：
+控制面数据库使用 PostgreSQL，库名：
 
 - `aidbopt_control`
 
-#### 表：`mcp_connections`
+### 表：`mcp_connections`
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
@@ -248,7 +193,7 @@ Application/
 | `created_at` | `timestamp` | 创建时间 |
 | `updated_at` | `timestamp` | 更新时间 |
 
-#### 表：`mcp_tools`
+### 表：`mcp_tools`
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
@@ -264,7 +209,7 @@ Application/
 | `created_at` | `timestamp` | 创建时间 |
 | `updated_at` | `timestamp` | 更新时间 |
 
-#### 表：`mcp_tool_executions`
+### 表：`mcp_tool_executions`
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
@@ -278,7 +223,10 @@ Application/
 | `error_message` | `text` | 错误信息 |
 | `created_at` | `timestamp` | 执行时间 |
 
-#### 表：`data_initialization_runs`
+### 表：`data_initialization_runs`
+
+> 这个表仅用于“展示状态”和“记录结果”，不是幂等主判据。  
+> 真正的幂等以 EF Core migration history 为准。
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
@@ -292,14 +240,14 @@ Application/
 | `completed_at` | `timestamp` | 完成时间 |
 | `error_message` | `text` | 错误信息 |
 
-### 4.2 PostgreSQL / MySQL 业务测试库
+## 5.2 PostgreSQL / MySQL 业务测试库
 
-建议数据库名：
+数据库名：
 
 - PostgreSQL：`aidbopt_lab_pg`
 - MySQL：`aidbopt_lab_mysql`
 
-#### 表：`orders`
+### 表：`orders`
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
@@ -311,7 +259,7 @@ Application/
 | `created_at` | `timestamp/datetime` | 创建时间 |
 | `updated_at` | `timestamp/datetime` | 更新时间 |
 
-#### 表：`order_items`
+### 表：`order_items`
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
@@ -324,9 +272,9 @@ Application/
 | `line_amount` | `decimal(18,2)` | 小计 |
 | `created_at` | `timestamp/datetime` | 创建时间 |
 
-## 5. 领域模型设计
+## 6. 订单域模型设计
 
-### 5.1 枚举
+### 6.1 枚举
 
 ```csharp
 public enum OrderStatus
@@ -357,148 +305,124 @@ public enum DataInitializationState
 }
 ```
 
-### 5.2 聚合根：`Order`
+### 6.2 聚合根：`Order`
 
-建议公开行为：
+公开行为：
 
 - `Create(...)`
 - `AddItem(...)`
 - `ChangeStatus(...)`
 - `RecalculateTotal()`
 
-建议签名：
+### 6.3 实体：`OrderItem`
 
-```csharp
-public sealed class Order
-{
-    public long Id { get; }
-    public OrderNumber OrderNumber { get; }
-    public long CustomerId { get; }
-    public OrderStatus Status { get; private set; }
-    public Money TotalAmount { get; private set; }
-    public DateTimeOffset CreatedAt { get; }
-    public DateTimeOffset UpdatedAt { get; private set; }
+负责表达订单明细及金额规则。
 
-    public IReadOnlyCollection<OrderItem> Items => _items.AsReadOnly();
+## 7. 测试数据初始化设计
 
-    public static Order Create(OrderNumber orderNumber, long customerId, DateTimeOffset createdAt);
-    public void AddItem(long productId, string productName, int quantity, Money unitPrice, DateTimeOffset createdAt);
-    public void ChangeStatus(OrderStatus newStatus, DateTimeOffset updatedAt);
-    private void RecalculateTotal();
-}
-```
+### 7.1 目标规模
 
-### 5.3 实体：`OrderItem`
+当前目标规模改为：
 
-```csharp
-public sealed class OrderItem
-{
-    public long Id { get; }
-    public long ProductId { get; }
-    public string ProductName { get; }
-    public int Quantity { get; }
-    public Money UnitPrice { get; }
-    public Money LineAmount { get; }
-    public DateTimeOffset CreatedAt { get; }
-}
-```
+- PostgreSQL：`10w` 订单 + 订单明细
+- MySQL：`10w` 订单 + 订单明细
 
-## 6. AppHost 详细设计
+### 7.2 幂等策略
 
-### 6.1 新增数据库资源
+测试数据通过 **EF Core 迁移文件中的 SQL** 实现。
 
-在现有实例基础上新增：
+因此：
 
-- PostgreSQL 控制面库：`aidbopt_control`
-- PostgreSQL 业务测试库：`aidbopt_lab_pg`
-- MySQL 业务测试库：`aidbopt_lab_mysql`
+- 首次 `MigrateAsync()` 时执行造数 SQL
+- 后续再次 `MigrateAsync()` 时，由 EF Core migration history 自动跳过
+- 不再依赖运行时服务自行判断“是否已初始化”
 
-### 6.2 新增 DataInit 项目资源
+### 7.3 DataInit 责任
 
-AppHost 中新增：
+`DataInit` 只负责：
 
-```csharp
-builder.AddProject<Projects.AIDbOptimize_DataInit>("data-init")
-```
+1. 调用 PostgreSQL 业务测试库 `MigrateAsync()`
+2. 调用 MySQL 业务测试库 `MigrateAsync()`
+3. 将迁移结果写入 `data_initialization_runs`
 
-行为要求：
+### 7.4 造数位置
 
-- 等待控制面库、PostgreSQL 业务测试库、MySQL 业务测试库就绪
-- 注入相关连接串
+真正的订单测试数据 SQL 应放在：
 
-## 7. DataInit 详细设计
+- `PostgreSqlLab` 对应的 EF Core migration 文件
+- `MySqlLab` 对应的 EF Core migration 文件
 
-### 7.1 建议新增类
+而不放在：
 
-- `DataInitializationHostedService`
-- `IDataInitializer`
 - `PostgreSqlLabInitializer`
 - `MySqlLabInitializer`
-- `InitializationStateService`
+- `DataInitializationHostedService`
 
-### 7.2 初始化伪代码
+### 7.5 迁移 SQL 设计原则
 
-```csharp
-StartAsync():
-    await InitializeEngineAsync(PostgreSql)
-    await InitializeEngineAsync(MySql)
+- 订单与订单明细统一在迁移 SQL 中生成
+- 订单号可通过序列批量生成
+- 明细数量控制在合理范围内，例如每单 1~3 条
+- 总金额在迁移 SQL 中回填
+- SQL 规模控制在 `10w` 级别
 
-InitializeEngineAsync(engine):
-    state = await stateService.GetLatestAsync(engine, seedVersion)
-    if state == Completed:
-        return
+## 8. MCP 详细设计
 
-    await stateService.MarkInProgressAsync(engine, seedVersion, targetCount)
+### 8.1 当前状态
 
-    try:
-        await dbContext.Database.MigrateAsync()
-        await initializer.SeedLargeDatasetAsync()
-        await stateService.MarkCompletedAsync(engine, seedVersion)
-    catch ex:
-        await stateService.MarkFailedAsync(engine, seedVersion, ex.Message)
-        throw
-```
+当前代码里：
 
-## 8. MCP 管理详细设计
+- 有 MCP 连接持久化
+- 有默认连接种子
+- 有工具列表持久化
+- 有最小只读工具执行能力
 
-### 8.1 后端接口抽象
+但还**不是真实 MCP 调用**：
 
-建议新增：
+- 发现工具不是 `tools/list`
+- 执行工具不是 `tools/call`
 
-- `IMcpConnectionRepository`
-- `IMcpToolRepository`
-- `IMcpDiscoveryService`
-- `IMcpToolExecutionService`
-- `IAgentToolAssemblyService`
+### 8.2 下一步真实 MCP 方案
 
-### 8.2 工具发现伪代码
+目标替换为：
 
-```csharp
-DiscoverToolsAsync(connectionId):
-    connection = repository.GetById(connectionId)
-    client = mcpClientFactory.Create(connection)
-    tools = client.ListTools()
-    toolRepository.UpsertMany(mappedTools)
-    return mappedTools
-```
+1. 根据 `mcp_connections` 中的配置启动 MCP server 子进程
+2. 通过 stdio 建立 MCP client 会话
+3. 发现工具时调用真实 `tools/list`
+4. 执行工具时调用真实 `tools/call`
+5. 将结果写回控制面库
 
-### 8.3 Agent 工具包装伪代码
+### 8.3 建议新增类
+
+- `McpClientFactory`
+- `McpProcessSession`
+- `McpConnectionEnvironmentBuilder`
+
+### 8.4 Agent 工具接入
+
+后续要把 `mcp_tools` 转成 Agent 所需的工具描述或 `AIFunction`：
 
 ```csharp
 foreach (var tool in tools)
 {
     var aiFunction = ConvertToAIFunction(tool);
 
-    if (tool.ApprovalMode == ApprovalRequired)
+    if (tool.ApprovalMode == ToolApprovalMode.ApprovalRequired)
+    {
         assembledTools.Add(new ApprovalRequiredAIFunction(aiFunction));
+    }
     else
+    {
         assembledTools.Add(aiFunction);
+    }
 }
 ```
 
+当前代码只到“返回 `AgentToolDescriptor`”这一步，尚未真正接入 `ApprovalRequiredAIFunction`。
+
 ## 9. API 详细设计
 
-建议新增：
+已具备或计划具备：
 
 - `GET /api/mcp/connections`
 - `POST /api/mcp/connections`
@@ -510,111 +434,75 @@ foreach (var tool in tools)
 - `GET /api/mcp/executions`
 - `GET /api/data-init/status`
 
-### 示例：执行工具请求
+### 当前执行接口说明
 
-```json
-{
-  "payload": {
-    "orderNumber": "ORD-20260423-000000001",
-    "customerId": 10001,
-    "items": [
-      {
-        "productId": 20001,
-        "productName": "Keyboard",
-        "quantity": 2,
-        "unitPrice": 199.99
-      }
-    ]
-  }
-}
-```
+当前版本的 `/api/mcp/tools/{toolId}/execute` 只保证最小链路可用：
+
+- 支持一组只读工具
+- 返回执行结果
+- 写入执行记录
+
+它还不是最终的通用 `tools/call` 执行器。
 
 ## 10. 前端页面设计
 
-### 10.1 页面路由
+### 10.1 当前实现形态
 
-建议新增：
+当前不是独立 `/mcp` 路由，而是在 `App.vue` 中通过视图切换显示：
 
-- `/mcp`
+- 资源概览
+- MCP 管理
 
-### 10.2 页面 ASCII 草图
+### 10.2 当前页面区块
 
 ```text
 +----------------------------------------------------------------------------------+
-| MCP 管理台                                                                       |
+| MCP 管理视图                                                                     |
 +----------------------------------------------------------------------------------+
 | [连接列表]                                                                       |
-| -------------------------------------------------------------------------------- |
-| 名称                  引擎        数据库              状态        操作            |
-| pgsql-lab-default     PostgreSQL  aidbopt_lab_pg      Ready       [获取工具]     |
-| mysql-lab-default     MySQL       aidbopt_lab_mysql   Ready       [获取工具]     |
-+----------------------------------------------------------------------------------+
 | [工具列表]                                                                       |
-| -------------------------------------------------------------------------------- |
-| 工具名              类型      权限枚举               启用状态     操作            |
-| insert_order        写工具    [不需要审核 v]         启用         [执行]          |
-| insert_order_item   写工具    [需要审核 v]           启用         [执行]          |
-| list_orders         读工具    [不需要审核 v]         启用         [执行]          |
-+----------------------------------------------------------------------------------+
 | [通用工具执行器]                                                                 |
-| -------------------------------------------------------------------------------- |
-| 当前连接: [pgsql-lab-default           v]                                        |
-| 当前工具: [insert_order                v]                                        |
-| 参数 JSON:                                                                        |
-| {                                                                                |
-|   "orderNumber": "ORD-20260423-000000001",                                      |
-|   "customerId": 10001,                                                           |
-|   "items": [ ... ]                                                               |
-| }                                                                                |
-|                                                                  [执行工具]      |
-+----------------------------------------------------------------------------------+
-| [执行结果]                                                                       |
-| -------------------------------------------------------------------------------- |
-| 状态: 成功                                                                        |
-| 返回: { "inserted": true, "orderId": 123456 }                                   |
-+----------------------------------------------------------------------------------+
 | [初始化状态]                                                                     |
-| -------------------------------------------------------------------------------- |
-| PostgreSQL: Completed   目标订单数: 10000000   完成时间: 2026-04-23 18:45        |
-| MySQL:      Completed   目标订单数: 10000000   完成时间: 2026-04-23 19:02        |
 +----------------------------------------------------------------------------------+
 ```
 
-### 10.3 前端模块建议
+### 10.3 当前前端模块
 
 ```text
 src/
-├─ pages/
-│  └─ mcp/
-│     └─ McpManagementPage.vue
+├─ api/
+│  └─ mcp.ts
 ├─ components/
 │  └─ mcp/
 │     ├─ McpConnectionTable.vue
 │     ├─ McpToolTable.vue
 │     ├─ McpToolExecutor.vue
 │     └─ DataInitStatusPanel.vue
-├─ api/
+├─ models/
 │  └─ mcp.ts
-└─ models/
-   └─ mcp.ts
+└─ App.vue
 ```
 
 ## 11. 后端新增 / 修改类清单
 
-### 11.1 新增类
+### 已新增
 
-- `AIDbOptimize.Domain`: `Order`, `OrderItem`, `Money`, `OrderNumber`, `OrderStatus`
-- `AIDbOptimize.Infrastructure`: `ControlPlaneDbContext`, `PostgreSqlLabDbContext`, `MySqlLabDbContext`
-- `AIDbOptimize.Infrastructure`: `McpConnectionEntity`, `McpToolEntity`, `McpToolExecutionEntity`, `DataInitializationRunEntity`
-- `AIDbOptimize.Infrastructure`: `McpConnectionRepository`, `McpToolRepository`, `McpDiscoveryService`, `McpToolExecutionService`
-- `AIDbOptimize.Infrastructure`: `PostgreSqlLabInitializer`, `MySqlLabInitializer`, `InitializationStateService`
-- `AIDbOptimize.ApiService`: `McpApi`, `DataInitializationApi`
+- `ControlPlaneDbContext`
+- `PostgreSqlLabDbContext`
+- `MySqlLabDbContext`
+- `McpConnectionRepository`
+- `McpToolRepository`
+- `DataInitializationRunRepository`
+- `McpApi`
+- `DataInitializationApi`
+- `ControlPlaneMigrationHostedService`
+- `ControlPlaneDefaultSeedHostedService`
 
-### 11.2 修改类
+### 下一步建议新增
 
-- `AIDbOptimize.AppHost/AppHost.cs`
-- `AIDbOptimize.ApiService/Program.cs`
-- `AIDbOptimize.Web/src/App.vue`
+- `McpClientFactory`
+- `McpProcessSession`
+- 迁移内 10w 造数 SQL
 
 ## 12. 文档关系
 

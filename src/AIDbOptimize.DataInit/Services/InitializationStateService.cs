@@ -7,11 +7,14 @@ using Microsoft.EntityFrameworkCore;
 namespace AIDbOptimize.DataInit.Services;
 
 /// <summary>
-/// 统一管理 data_initialization_runs 的读写。
-/// 这样 hosted service 不需要直接了解控制面表结构。
+/// 统一管理 `data_initialization_runs` 的读写。
+/// 该表用于展示初始化状态，不作为幂等主判据。
 /// </summary>
 public sealed class InitializationStateService(IDbContextFactory<ControlPlaneDbContext> dbContextFactory)
 {
+    /// <summary>
+    /// 读取指定数据库与种子版本最近一次初始化记录。
+    /// </summary>
     public async Task<DataInitializationRunEntity?> GetLatestAsync(
         DatabaseEngine engine,
         string databaseName,
@@ -26,6 +29,9 @@ public sealed class InitializationStateService(IDbContextFactory<ControlPlaneDbC
             .FirstOrDefaultAsync(cancellationToken);
     }
 
+    /// <summary>
+    /// 将当前初始化批次标记为进行中。
+    /// </summary>
     public async Task<DataInitializationRunEntity> MarkInProgressAsync(
         DatabaseEngine engine,
         string databaseName,
@@ -51,6 +57,9 @@ public sealed class InitializationStateService(IDbContextFactory<ControlPlaneDbC
         return entity;
     }
 
+    /// <summary>
+    /// 将初始化记录标记为已完成。
+    /// </summary>
     public async Task MarkCompletedAsync(Guid runId, CancellationToken cancellationToken = default)
     {
         await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
@@ -62,6 +71,24 @@ public sealed class InitializationStateService(IDbContextFactory<ControlPlaneDbC
         await dbContext.SaveChangesAsync(cancellationToken);
     }
 
+    /// <summary>
+    /// 当迁移已完成但种子尚未落地时，将状态回退为未开始。
+    /// 这样可以避免界面误报“已完成”，也不会让幂等逻辑被错误短路。
+    /// </summary>
+    public async Task MarkNotStartedAsync(Guid runId, string? message, CancellationToken cancellationToken = default)
+    {
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var entity = await GetRequiredEntityAsync(dbContext, runId, cancellationToken);
+        entity.State = DataInitializationState.NotStarted;
+        entity.CompletedAt = null;
+        entity.ErrorMessage = message;
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// 将初始化记录标记为失败。
+    /// </summary>
     public async Task MarkFailedAsync(Guid runId, string? errorMessage, CancellationToken cancellationToken = default)
     {
         await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
@@ -73,6 +100,9 @@ public sealed class InitializationStateService(IDbContextFactory<ControlPlaneDbC
         await dbContext.SaveChangesAsync(cancellationToken);
     }
 
+    /// <summary>
+    /// 读取必定存在的初始化记录。
+    /// </summary>
     private static async Task<DataInitializationRunEntity> GetRequiredEntityAsync(
         ControlPlaneDbContext dbContext,
         Guid runId,

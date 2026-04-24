@@ -75,8 +75,18 @@ public sealed class DataInitializationHostedService(
 
         try
         {
-            await initializer.InitializeAsync(cancellationToken);
-            await initializationStateService.MarkCompletedAsync(run.Id, cancellationToken);
+            var completed = await initializer.InitializeAsync(cancellationToken);
+
+            if (completed)
+            {
+                await initializationStateService.MarkCompletedAsync(run.Id, cancellationToken);
+                return;
+            }
+
+            await initializationStateService.MarkNotStartedAsync(
+                run.Id,
+                "已完成迁移，但真实种子迁移尚未落地。",
+                cancellationToken);
         }
         catch (Exception exception)
         {

@@ -12,6 +12,7 @@ namespace AIDbOptimize.Infrastructure.Mcp;
 /// <summary>
 /// MCP 工具执行服务。
 /// 当前阶段先支持一组最小的只读数据库工具，便于前端执行链路跑通。
+/// 后续应替换为真实 MCP `tools/call` 调用。
 /// </summary>
 public sealed class McpToolExecutionService(
     IMcpToolRepository toolRepository,

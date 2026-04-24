@@ -75,6 +75,9 @@ public sealed class McpDiscoveryAppService(
         return records.Select(record => McpToolDto.FromDefinition(ToDefinition(record))).ToArray();
     }
 
+    /// <summary>
+    /// 将连接记录转换为跨层定义对象。
+    /// </summary>
     private static McpConnectionDefinition ToDefinition(McpConnectionRecord record)
     {
         return new McpConnectionDefinition(
@@ -92,6 +95,9 @@ public sealed class McpDiscoveryAppService(
             record.LastDiscoveredAt);
     }
 
+    /// <summary>
+    /// 将工具记录转换为跨层定义对象。
+    /// </summary>
     private static McpToolDefinition ToDefinition(McpToolRecord record)
     {
         return new McpToolDefinition(

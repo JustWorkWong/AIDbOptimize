@@ -7,8 +7,8 @@ using Microsoft.Extensions.Logging;
 namespace AIDbOptimize.DataInit.Services;
 
 /// <summary>
-/// MySQL 业务测试库初始化器骨架。
-/// 当前先打通迁移入口，后续再补大规模造数逻辑。
+/// MySQL 业务测试库初始化器。
+/// 当前阶段只负责应用迁移；真实 10w 级数据种子会在后续迁移中补齐。
 /// </summary>
 public sealed class MySqlLabInitializer(
     IDbContextFactory<MySqlLabDbContext> dbContextFactory,
@@ -20,14 +20,18 @@ public sealed class MySqlLabInitializer(
 
     public string SeedVersion => "v1";
 
-    public long TargetOrderCount => 10_000_000;
+    public long TargetOrderCount => 100_000;
 
-    public async Task InitializeAsync(CancellationToken cancellationToken = default)
+    /// <summary>
+    /// 应用 MySQL 业务测试库迁移。
+    /// 当前返回 false，表示真实数据种子尚未在迁移中落地。
+    /// </summary>
+    public async Task<bool> InitializeAsync(CancellationToken cancellationToken = default)
     {
         await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         await dbContext.Database.MigrateAsync(cancellationToken);
 
-        logger.LogInformation(
-            "MySQL 初始化骨架已执行：迁移已应用，后续补充 1000 万级造数逻辑。");
+        logger.LogInformation("MySQL 业务测试库迁移已完成，待后续补充 10w 级种子迁移。");
+        return false;
     }
 }

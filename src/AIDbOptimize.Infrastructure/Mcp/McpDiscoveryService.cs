@@ -6,13 +6,14 @@ namespace AIDbOptimize.Infrastructure.Mcp;
 
 /// <summary>
 /// MCP 工具发现服务。
-/// 当前版本先提供最小可运行实现，返回与数据库诊断相关的默认工具定义，
-/// 后续再替换为真实 MCP server 的 tools/list 调用。
+/// 当前版本仍是最小可运行骨架，返回一组固定数据库工具定义。
+/// 后续应替换为真实 MCP server 的 `tools/list` 调用。
 /// </summary>
 public sealed class McpDiscoveryService : IMcpDiscoveryService
 {
     /// <summary>
-    /// 发现连接下可用的工具列表。
+    /// 返回当前连接下可用的工具列表。
+    /// 当前实现不启动真实 MCP 进程，只提供演示级工具集合。
     /// </summary>
     public Task<IReadOnlyCollection<McpToolDefinition>> DiscoverToolsAsync(
         McpConnectionDefinition connection,
