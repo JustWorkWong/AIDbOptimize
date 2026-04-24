@@ -13,7 +13,7 @@
 
 ## 2. 总体架构
 
-建议解决方案维持以下分层：
+解决方案当前维持以下分层：
 
 - `AIDbOptimize.Domain`
 - `AIDbOptimize.Application`
@@ -36,27 +36,38 @@
 ## 3. 当前约束
 
 - PostgreSQL 与 MySQL 使用相同的订单 / 订单明细业务模型
-- 测试数据初始化的目标规模为 `10w` 级订单与明细，不再按 `1000w` 规划
+- 测试数据初始化目标规模固定为 `10w` 级订单与明细
 - 订单测试数据通过 **EF Core 迁移文件中的 SQL** 生成
 - 幂等性由 **EF Core migration history** 天然保证
-- `data_initialization_runs` 主要用于前端状态可视化，不是幂等主判据
-- `ApprovalRequired` 仅在 Agent 工具装配阶段生效
+- `data_initialization_runs` 主要用于前端状态可视化，不作为幂等主判据
 - 前端当前采用“嵌入首页的 MCP 管理视图”，不是独立 `/mcp` 路由
-- 当前 MCP 仍是最小骨架：
-  - 工具发现不是实时 `tools/list`
-  - 工具执行不是实时 `tools/call`
 
-## 4. 下一阶段重点
+## 4. 当前进展
 
-下一轮实现重点固定为：
+已经完成：
 
-1. 修正 `DataInit` 状态逻辑，避免未造数就被标记为完成
-2. 将 `10w` 级测试数据下沉到 EF Core 迁移 SQL
-3. 用真实 MCP `tools/list / tools/call` 替换当前最小骨架
-4. 将 MCP 工具转换为 Agent 所需的 `Tools`
-5. 对 `ApprovalRequired` 工具接入 `ApprovalRequiredAIFunction`
+- DDD 基础分层与订单域骨架
+- 控制面数据库、业务测试库和三套迁移
+- `10w` 级测试数据迁移
+- 控制面默认 MCP 连接种子
+- 真实 MCP `tools/list / tools/call` 最小链路
+- Agent 工具装配到真实 `AIFunction`
+- `ApprovalRequiredAIFunction` 已按工具配置生效
+- 前端 MCP 管理视图第一版
 
-## 5. 文档关系
+仍未完成：
+
+- 更丰富的前端写入型工具管理体验
+- MySQL 写入型 MCP 工具的长期方案统一
+
+## 5. 下一阶段重点
+
+下一轮重点固定为：
+
+1. 完善前端对真实写入型工具的管理体验
+2. 明确 MySQL 写入型 MCP 工具的长期方案
+
+## 6. 文档关系
 
 本文件只描述总体目标与边界。
 

@@ -1,6 +1,7 @@
 using System.Text.Json;
 using AIDbOptimize.Application.Abstractions.Mcp;
 using AIDbOptimize.Application.Abstractions.Persistence;
+using AIDbOptimize.Application.Abstractions.Agents;
 using AIDbOptimize.Application.Mcp.Services;
 using AIDbOptimize.Domain.Mcp.Enums;
 using AIDbOptimize.Infrastructure.Persistence;
@@ -22,6 +23,7 @@ internal static class McpApiRouteBuilderExtensions
         group.MapPost("/connections", HandleCreateConnectionAsync);
         group.MapPut("/connections/{connectionId:guid}", HandleUpdateConnectionAsync);
         group.MapGet("/connections/{connectionId:guid}/tools", HandleGetToolsAsync);
+        group.MapGet("/connections/{connectionId:guid}/agent-tools", HandleGetAgentToolsAsync);
         group.MapPost("/connections/{connectionId:guid}/discover-tools", HandleDiscoverToolsAsync);
         group.MapPut("/tools/{toolId:guid}/approval-mode", HandleUpdateApprovalModeAsync);
         group.MapPost("/tools/{toolId:guid}/execute", HandleExecuteToolAsync);
@@ -86,6 +88,27 @@ internal static class McpApiRouteBuilderExtensions
     {
         var result = await appService.GetToolsAsync(connectionId, cancellationToken);
         return Results.Ok(result);
+    }
+
+    /// <summary>
+    /// 查询连接下可供 Agent 使用的工具集合。
+    /// 该接口主要用于验证真实 `AIFunction / ApprovalRequiredAIFunction` 装配是否正确。
+    /// </summary>
+    private static async Task<IResult> HandleGetAgentToolsAsync(
+        Guid connectionId,
+        IAgentToolAssemblyService assemblyService,
+        CancellationToken cancellationToken)
+    {
+        await using var session = await assemblyService.AssembleAsync(connectionId, cancellationToken);
+
+        var payload = session.Tools.Select(tool => new
+        {
+            tool.Name,
+            TypeName = tool.GetType().Name,
+            Description = tool.Description
+        });
+
+        return Results.Ok(payload);
     }
 
     /// <summary>

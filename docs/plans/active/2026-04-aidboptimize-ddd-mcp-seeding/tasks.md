@@ -1,27 +1,5 @@
 # AIDbOptimize DDD + MCP + 测试数据初始化原子任务清单
 
-说明：
-
-- 本清单用于后续 agent 逐项执行并回填状态。
-- 每项任务都尽量保持“单一产出、单一验证目标”。
-- 除非明确标注可并行，否则默认串行执行。
-- 完成后请直接把对应项从 `[ ]` 改成 `[x]`。
-- 实现前必须先阅读：
-  - `design.md`
-  - `detailed-design.md`
-
-状态约定：
-
-- `[ ]` 未开始
-- `[x]` 已完成
-
-字段约定：
-
-- `依赖`：必须先完成的任务
-- `产出物`：本任务要新增或修改的核心文件/类
-- `验证`：完成后必须执行的命令或检查动作
-- `完成标准`：判断该任务是否真正完成
-
 ## 阶段 0：文档基线
 
 - [x] T0.1 建立 `docs` 目录结构
@@ -96,64 +74,12 @@
 ## 阶段 8：10w 级测试数据初始化
 
 - [x] T8.1 将 PostgreSQL 造数下沉到 EF Core 迁移 SQL
-  - 依赖：T5.7
-  - 产出物：
-    - `PostgreSqlLab` 新迁移文件
-  - 验证：
-    - `dotnet tool run dotnet-ef migrations add ...`
-  - 完成标准：
-    - PostgreSQL 迁移中包含订单与明细的批量造数 SQL
-
 - [x] T8.2 将 MySQL 造数下沉到 EF Core 迁移 SQL
-  - 依赖：T5.8
-  - 产出物：
-    - `MySqlLab` 新迁移文件
-  - 验证：
-    - `dotnet tool run dotnet-ef migrations add ...`
-  - 完成标准：
-    - MySQL 迁移中包含订单与明细的批量造数 SQL
-
 - [x] T8.3 将目标规模统一为 `10w`
-  - 依赖：T8.1, T8.2
-  - 产出物：
-    - 迁移 SQL
-    - 相关配置与文档
-  - 验证：
-    - 迁移代码检查
-  - 完成标准：
-    - PostgreSQL / MySQL 目标规模都为 10w
-
 - [x] T8.4 修正 `DataInit` 状态逻辑
-  - 依赖：T8.1, T8.2
-  - 产出物：
-    - `DataInitializationHostedService.cs`
-    - `PostgreSqlLabInitializer.cs`
-    - `MySqlLabInitializer.cs`
-  - 验证：
-    - 启动后状态与真实造数结果一致
-  - 完成标准：
-    - 未完成造数时不会被错误标记为 `Completed`
-
 - [x] T8.5 首次启动完成 PostgreSQL 10w 数据灌库
-  - 依赖：T8.4
-  - 验证：
-    - PostgreSQL 订单量检查
-  - 完成标准：
-    - PostgreSQL 达到目标订单量
-
 - [x] T8.6 首次启动完成 MySQL 10w 数据灌库
-  - 依赖：T8.4
-  - 验证：
-    - MySQL 订单量检查
-  - 完成标准：
-    - MySQL 达到目标订单量
-
 - [x] T8.7 二次启动验证幂等跳过
-  - 依赖：T8.5, T8.6
-  - 验证：
-    - 二次启动日志
-  - 完成标准：
-    - 二次启动不会重复执行数据迁移
 
 ## 阶段 9：MCP 持久化与发现
 
@@ -161,69 +87,18 @@
 - [x] T9.2 新增 `IMcpToolRepository`
 - [x] T9.3 实现 `McpConnectionRepository`
 - [x] T9.4 实现 `McpToolRepository`
-
-- [ ] T9.5 新增真实 MCP client/session factory
-  - 依赖：T9.3, T9.4
-  - 产出物：
-    - `Infrastructure/Mcp/McpClientFactory.cs`
-    - `Infrastructure/Mcp/McpProcessSession.cs`
-  - 验证：
-    - 能建立真实 MCP 会话
-  - 完成标准：
-    - 后端可根据连接配置启动 MCP server 并拿到 client
-
-- [ ] T9.6 用真实 `tools/list` 实现工具发现
-  - 依赖：T9.5
-  - 产出物：
-    - `Infrastructure/Mcp/McpDiscoveryService.cs`
-  - 验证：
-    - `POST /api/mcp/connections/{id}/discover-tools`
-  - 完成标准：
-    - 工具列表来自真实 MCP server，而不是硬编码
-
+- [x] T9.5 新增真实 MCP client/session factory
+- [x] T9.6 用真实 `tools/list` 实现工具发现
 - [x] T9.7 写入默认 PostgreSQL / MySQL MCP 连接
 
 ## 阶段 10：工具权限与执行
 
 - [x] T10.1 新增工具执行服务接口
-
-- [ ] T10.2 用真实 `tools/call` 实现通用工具执行
-  - 依赖：T9.5
-  - 产出物：
-    - `Infrastructure/Mcp/McpToolExecutionService.cs`
-  - 验证：
-    - `POST /api/mcp/tools/{toolId}/execute`
-  - 完成标准：
-    - 执行逻辑通过真实 MCP server 完成
-
-- [ ] T10.3 落库真实工具执行记录
-  - 依赖：T10.2
-  - 产出物：
-    - 执行记录持久化逻辑
-  - 验证：
-    - `GET /api/mcp/executions`
-  - 完成标准：
-    - 真实 MCP 执行记录可查询
-
+- [x] T10.2 用真实 `tools/call` 实现通用工具执行
+- [x] T10.3 落库真实工具执行记录
 - [x] T10.4 实现工具权限更新逻辑
-
-- [ ] T10.5 实现 Agent 工具装配到真实 Agent Tools
-  - 依赖：T10.4, T10.2
-  - 产出物：
-    - `AgentToolAssemblyService.cs`
-  - 验证：
-    - 生成真实 Agent Tools 集合
-  - 完成标准：
-    - 不再只是返回 `AgentToolDescriptor`
-
-- [ ] T10.6 对 `ApprovalRequired` 工具接入 `ApprovalRequiredAIFunction`
-  - 依赖：T10.5
-  - 产出物：
-    - Agent 工具包装逻辑
-  - 验证：
-    - 针对 `ApprovalRequired` 工具的装配结果包含审批包装
-  - 完成标准：
-    - 审核能力在 Agent 场景真实生效
+- [x] T10.5 实现 Agent 工具装配到真实 Agent Tools
+- [x] T10.6 对 `ApprovalRequired` 工具接入 `ApprovalRequiredAIFunction`
 
 ## 阶段 11：API 落地
 
@@ -233,17 +108,8 @@
 - [x] T11.4 新增工具发现接口
 - [x] T11.5 新增工具列表接口
 - [x] T11.6 新增工具权限更新接口
-
-- [ ] T11.7 新增真实工具执行接口
-  - 依赖：T10.2
-  - 完成标准：
-    - 执行接口走真实 MCP `tools/call`
-
-- [ ] T11.8 新增真实执行记录查询接口
-  - 依赖：T10.3
-  - 完成标准：
-    - 返回真实 MCP 调用记录
-
+- [x] T11.7 新增真实工具执行接口
+- [x] T11.8 新增真实执行记录查询接口
 - [x] T11.9 新增初始化状态接口
 
 ## 阶段 12：前端 MCP 管理视图
@@ -254,17 +120,7 @@
 - [x] T12.4 新增工具表格组件
 - [x] T12.5 新增通用工具执行器组件
 - [x] T12.6 新增初始化状态面板组件
-
 - [x] T12.7 在 `App.vue` 中实现 MCP 管理视图
-  - 依赖：T12.3, T12.4, T12.5, T12.6
-  - 产出物：
-    - `Web/src/App.vue`
-    - `Web/src/components/mcp/*`
-  - 验证：
-    - `npm run build`
-  - 完成标准：
-    - 页面包含连接、工具、执行器、初始化状态四个区块
-
 - [x] T12.8 在首页加入 MCP 管理视图入口
 
 ## 阶段 13：集成验证
@@ -273,34 +129,15 @@
 - [x] T13.2 前端编译通过
 - [x] T13.3 Aspire 启动后控制面库迁移成功
 - [x] T13.4 Aspire 启动后 PostgreSQL / MySQL 业务测试库迁移成功
-
 - [x] T13.5 首次启动完成 10w 数据灌库
 - [x] T13.6 二次启动验证幂等跳过
+- [x] T13.7 前端默认 MCP 连接可见
+- [x] T13.8 点击“获取工具”可拉取真实 PostgreSQL / MySQL 工具
+- [x] T13.9 通用工具执行器可执行真实工具
+- [x] T13.10 `ApprovalRequiredAIFunction` 包装逻辑验证通过
 
-- [ ] T13.7 前端默认 MCP 连接可见
-  - 依赖：T13.3, T12.8
-  - 完成标准：
-    - 在真实页面里确认默认连接可见
+## 备注
 
-- [ ] T13.8 点击“获取工具”可拉取真实 PostgreSQL / MySQL 工具
-  - 依赖：T13.7, T9.6
-  - 完成标准：
-    - 工具来自真实 MCP `tools/list`
-
-- [ ] T13.9 通用工具执行器可执行真实工具
-  - 依赖：T13.8, T10.2
-  - 完成标准：
-    - 前端执行器通过真实 `tools/call` 返回结果
-
-- [ ] T13.10 `ApprovalRequiredAIFunction` 包装逻辑验证通过
-  - 依赖：T10.6
-  - 完成标准：
-    - `ApprovalRequired` 工具被正确包装
-
-## Agent 执行备注
-
-- 如果设计发生变化，先更新：
-  1. `design.md`
-  2. `detailed-design.md`
-  3. `tasks.md`
-- 当前代码中的 MCP 与 DataInit 仍有“最小骨架”成分，后续 agent 不应把骨架误判为终态
+- 当前 PostgreSQL 默认 MCP 连接使用官方 `@modelcontextprotocol/server-postgres`
+- 当前 MySQL 默认 MCP 连接使用社区 `mysql-mcp-server`
+- 后续如果要支持 MySQL 写入型工具，需要单独确定新的 MySQL MCP 服务器方案

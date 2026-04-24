@@ -2,6 +2,8 @@ using AIDbOptimize.Domain.Mcp.Enums;
 using AIDbOptimize.Infrastructure.Persistence;
 using AIDbOptimize.Infrastructure.Persistence.Entities;
 using Microsoft.EntityFrameworkCore;
+using MySqlConnector;
+using Npgsql;
 
 namespace AIDbOptimize.ApiService.DatabaseMigrations;
 
@@ -18,29 +20,32 @@ internal sealed class ControlPlaneDefaultSeedHostedService(
     {
         await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
 
-        await EnsureConnectionAsync(
+        var postgreSqlConnectionString = ResolveConnectionString(configuration, "aidbopt-lab-pg", "PostgreSqlLab", string.Empty);
+        var mySqlConnectionString = ResolveConnectionString(configuration, "aidbopt-lab-mysql", "MySqlLab", string.Empty);
+
+        await UpsertConnectionAsync(
             dbContext,
             name: "pgsql-lab-default",
             engine: DatabaseEngine.PostgreSql,
             displayName: "PostgreSQL 测试库",
             databaseName: "aidbopt_lab_pg",
             serverCommand: "npx",
-            serverArgumentsJson: """["-y","@modelcontextprotocol/server-postgres"]""",
-            environmentJson: BuildEnvironmentJson(ResolveConnectionString(configuration, "aidbopt-lab-pg", "PostgreSqlLab", string.Empty)),
-            databaseConnectionString: ResolveConnectionString(configuration, "aidbopt-lab-pg", "PostgreSqlLab", string.Empty),
+            serverArgumentsJson: BuildPostgreSqlArgumentsJson(postgreSqlConnectionString),
+            environmentJson: "{}",
+            databaseConnectionString: postgreSqlConnectionString,
             isDefault: true,
             cancellationToken: cancellationToken);
 
-        await EnsureConnectionAsync(
+        await UpsertConnectionAsync(
             dbContext,
             name: "mysql-lab-default",
             engine: DatabaseEngine.MySql,
             displayName: "MySQL 测试库",
             databaseName: "aidbopt_lab_mysql",
             serverCommand: "npx",
-            serverArgumentsJson: """["-y","@modelcontextprotocol/server-mysql"]""",
-            environmentJson: BuildEnvironmentJson(ResolveConnectionString(configuration, "aidbopt-lab-mysql", "MySqlLab", string.Empty)),
-            databaseConnectionString: ResolveConnectionString(configuration, "aidbopt-lab-mysql", "MySqlLab", string.Empty),
+            serverArgumentsJson: """["-y","mysql-mcp-server"]""",
+            environmentJson: BuildMySqlEnvironmentJson(mySqlConnectionString),
+            databaseConnectionString: mySqlConnectionString,
             isDefault: true,
             cancellationToken: cancellationToken);
 
@@ -54,9 +59,9 @@ internal sealed class ControlPlaneDefaultSeedHostedService(
     }
 
     /// <summary>
-    /// 若默认连接不存在，则补写一条默认记录。
+    /// 插入或更新一条默认连接配置。
     /// </summary>
-    private static async Task EnsureConnectionAsync(
+    private static async Task UpsertConnectionAsync(
         ControlPlaneDbContext dbContext,
         string name,
         DatabaseEngine engine,
@@ -69,33 +74,65 @@ internal sealed class ControlPlaneDefaultSeedHostedService(
         bool isDefault,
         CancellationToken cancellationToken)
     {
-        var exists = await dbContext.McpConnections.AnyAsync(x => x.Name == name, cancellationToken);
-        if (exists)
+        var entity = await dbContext.McpConnections.FirstOrDefaultAsync(x => x.Name == name, cancellationToken);
+        if (entity is null)
         {
-            return;
+            entity = new McpConnectionEntity
+            {
+                Id = Guid.NewGuid(),
+                Name = name,
+                CreatedAt = DateTimeOffset.UtcNow
+            };
+
+            dbContext.McpConnections.Add(entity);
         }
 
-        dbContext.McpConnections.Add(new McpConnectionEntity
-        {
-            Id = Guid.NewGuid(),
-            Name = name,
-            Engine = engine,
-            DisplayName = displayName,
-            ServerCommand = serverCommand,
-            ServerArgumentsJson = serverArgumentsJson,
-            EnvironmentJson = environmentJson,
-            DatabaseConnectionString = databaseConnectionString,
-            DatabaseName = databaseName,
-            IsDefault = isDefault,
-            Status = McpConnectionStatus.Draft,
-            CreatedAt = DateTimeOffset.UtcNow,
-            UpdatedAt = DateTimeOffset.UtcNow
-        });
+        entity.Engine = engine;
+        entity.DisplayName = displayName;
+        entity.ServerCommand = serverCommand;
+        entity.ServerArgumentsJson = serverArgumentsJson;
+        entity.EnvironmentJson = environmentJson;
+        entity.DatabaseConnectionString = databaseConnectionString;
+        entity.DatabaseName = databaseName;
+        entity.IsDefault = isDefault;
+        entity.Status = McpConnectionStatus.Draft;
+        entity.LastDiscoveredAt = null;
+        entity.UpdatedAt = DateTimeOffset.UtcNow;
     }
 
-    private static string BuildEnvironmentJson(string connectionString)
+    /// <summary>
+    /// 将 Npgsql 连接串转换为官方 postgres MCP server 所需的 URL 参数。
+    /// </summary>
+    private static string BuildPostgreSqlArgumentsJson(string connectionString)
     {
-        return $$"""{"DATABASE_URL":"{{connectionString.Replace("\\", "\\\\").Replace("\"", "\\\"")}}"}""";
+        var builder = new NpgsqlConnectionStringBuilder(connectionString);
+        var password = Uri.EscapeDataString(builder.Password ?? string.Empty);
+        var userName = Uri.EscapeDataString(builder.Username ?? string.Empty);
+        var database = Uri.EscapeDataString(builder.Database ?? string.Empty);
+        var host = builder.Host;
+        var port = builder.Port;
+        var url = $"postgresql://{userName}:{password}@{host}:{port}/{database}";
+
+        return $$"""["-y","@modelcontextprotocol/server-postgres","{{url}}"]""";
+    }
+
+    /// <summary>
+    /// 将 MySQL 连接串转换为社区 mysql MCP server 所需的环境变量。
+    /// 这里使用支持固定端口的 mysql-mcp-server，便于兼容当前 13306 端口。
+    /// </summary>
+    private static string BuildMySqlEnvironmentJson(string connectionString)
+    {
+        var builder = new MySqlConnectionStringBuilder(connectionString);
+
+        return $$"""
+        {
+          "MYSQL_HOST": "{{builder.Server}}",
+          "MYSQL_PORT": "{{builder.Port}}",
+          "MYSQL_USER": "{{builder.UserID}}",
+          "MYSQL_PASSWORD": "{{builder.Password}}",
+          "MYSQL_DATABASE": "{{builder.Database}}"
+        }
+        """;
     }
 
     private static string ResolveConnectionString(

@@ -1,51 +1,62 @@
+using System.Text.Json;
 using AIDbOptimize.Application.Abstractions.Mcp;
 using AIDbOptimize.Domain.Mcp.Enums;
 using AIDbOptimize.Domain.Mcp.Models;
+using ModelContextProtocol.Client;
 
 namespace AIDbOptimize.Infrastructure.Mcp;
 
 /// <summary>
 /// MCP 工具发现服务。
-/// 当前版本仍是最小可运行骨架，返回一组固定数据库工具定义。
-/// 后续应替换为真实 MCP server 的 `tools/list` 调用。
+/// 该服务会根据连接配置启动真实 MCP server，并调用 `tools/list` 获取工具定义。
 /// </summary>
-public sealed class McpDiscoveryService : IMcpDiscoveryService
+public sealed class McpDiscoveryService(McpClientFactory clientFactory) : IMcpDiscoveryService
 {
     /// <summary>
-    /// 返回当前连接下可用的工具列表。
-    /// 当前实现不启动真实 MCP 进程，只提供演示级工具集合。
+    /// 连接真实 MCP server，读取并转换全部工具定义。
     /// </summary>
-    public Task<IReadOnlyCollection<McpToolDefinition>> DiscoverToolsAsync(
+    public async Task<IReadOnlyCollection<McpToolDefinition>> DiscoverToolsAsync(
         McpConnectionDefinition connection,
         CancellationToken cancellationToken = default)
     {
-        IReadOnlyCollection<McpToolDefinition> tools =
-        [
-            CreateTool(connection, "query", "query", "执行查询语句", isWriteTool: false),
-            CreateTool(connection, "describe_table", "describe_table", "读取表结构", isWriteTool: false),
-            CreateTool(connection, "show_indexes", "show_indexes", "读取索引信息", isWriteTool: false),
-            CreateTool(connection, "get_config", "get_config", "读取数据库配置", isWriteTool: false)
-        ];
+        await using var session = await clientFactory.CreateAsync(connection, cancellationToken);
+        var tools = await session.Client.ListToolsAsync(cancellationToken: cancellationToken);
 
-        return Task.FromResult(tools);
+        return tools
+            .Select(tool => new McpToolDefinition(
+                Id: Guid.Empty,
+                ConnectionId: connection.Id,
+                ToolName: tool.Name,
+                DisplayName: string.IsNullOrWhiteSpace(tool.Title) ? tool.Name : tool.Title,
+                Description: tool.Description,
+                InputSchemaJson: JsonSerializer.Serialize(tool.ProtocolTool.InputSchema),
+                ApprovalMode: ToolApprovalMode.NoApproval,
+                IsEnabled: true,
+                IsWriteTool: InferWriteTool(tool)))
+            .ToArray();
     }
 
-    private static McpToolDefinition CreateTool(
-        McpConnectionDefinition connection,
-        string toolName,
-        string displayName,
-        string description,
-        bool isWriteTool)
+    /// <summary>
+    /// 根据工具元数据推断该工具是否为写入型工具。
+    /// 优先使用协议注解，其次才回退到名称关键字推断。
+    /// </summary>
+    private static bool InferWriteTool(McpClientTool tool)
     {
-        return new McpToolDefinition(
-            Guid.NewGuid(),
-            connection.Id,
-            toolName,
-            displayName,
-            description,
-            """{"type":"object","properties":{}}""",
-            ToolApprovalMode.NoApproval,
-            IsEnabled: true,
-            IsWriteTool: isWriteTool);
+        if (tool.ProtocolTool.Annotations?.ReadOnlyHint is true)
+        {
+            return false;
+        }
+
+        if (tool.ProtocolTool.Annotations?.DestructiveHint is true)
+        {
+            return true;
+        }
+
+        var name = tool.Name.ToLowerInvariant();
+        return name.Contains("insert")
+            || name.Contains("update")
+            || name.Contains("delete")
+            || name.Contains("create")
+            || name.Contains("write");
     }
 }

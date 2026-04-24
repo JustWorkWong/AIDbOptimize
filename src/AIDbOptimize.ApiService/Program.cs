@@ -32,6 +32,7 @@ builder.Services.AddDbContextFactory<ControlPlaneDbContext>(options =>
 builder.Services.AddHostedService<ControlPlaneMigrationHostedService>();
 builder.Services.AddHostedService<ControlPlaneDefaultSeedHostedService>();
 
+builder.Services.AddSingleton<McpClientFactory>();
 builder.Services.AddScoped<IMcpConnectionRepository, McpConnectionRepository>();
 builder.Services.AddScoped<IMcpToolRepository, McpToolRepository>();
 builder.Services.AddScoped<IDataInitializationRunRepository, DataInitializationRunRepository>();
@@ -40,7 +41,7 @@ builder.Services.AddScoped<IMcpToolExecutionService, McpToolExecutionService>();
 builder.Services.AddScoped<McpDiscoveryAppService>();
 builder.Services.AddScoped<McpToolPermissionAppService>();
 builder.Services.AddScoped<InitializationStatusAppService>();
-builder.Services.AddScoped<IAgentToolAssemblyService, AgentToolAssemblyService>();
+builder.Services.AddScoped<IAgentToolAssemblyService, AIDbOptimize.Infrastructure.Mcp.AgentToolAssemblyService>();
 
 builder.Services.AddCors(options =>
 {
@@ -104,9 +105,6 @@ app.Run();
 
 return;
 
-/// <summary>
-/// 构造单个基础设施资源的状态展示模型。
-/// </summary>
 static ServiceStatusResponse BuildServiceStatus(
     string displayName,
     string connectionStringName,
@@ -121,9 +119,6 @@ static ServiceStatusResponse BuildServiceStatus(
         Preview: MaskConnectionString(raw));
 }
 
-/// <summary>
-/// 对连接串做轻量脱敏，避免把默认密码直接回传到前端。
-/// </summary>
 static string MaskConnectionString(string? value)
 {
     if (string.IsNullOrWhiteSpace(value))
@@ -144,9 +139,6 @@ static string MaskConnectionString(string? value)
     return masked;
 }
 
-/// <summary>
-/// 解析必填连接串。
-/// </summary>
 static string ResolveConnectionString(
     IConfiguration configuration,
     string aspireName,
