@@ -15,19 +15,19 @@
 - [x] 修复“刚获取工具后保存审批报未找到工具”的主键错位问题
 - [x] 优化真实连接命令展示
 - [x] 修复 MCP 相关日志乱码
-- [x] 将默认 PostgreSQL MCP 连接切换为 `sgaunet/postgresql-mcp`
-- [x] 为默认 PostgreSQL 连接增加自动下载 launcher
+- [x] 修复 Windows 路径落库时的 JSON 转义问题
+- [x] 将默认 PostgreSQL MCP 回退为 npm 无状态实现
 
 ## 当前默认基线
 
-- PostgreSQL 默认 MCP：`sgaunet/postgresql-mcp`
-- PostgreSQL 启动方式：`powershell + postgresql-mcp-launcher.ps1`
+- PostgreSQL 默认 MCP：`@modelcontextprotocol/server-postgres`
+- PostgreSQL 启动方式：`npx -y @modelcontextprotocol/server-postgres <postgres-url>`
 - MySQL 默认 MCP：`mysql-mcp-server`
 
 ## 后续可选任务
 
 - [ ] 为 `docs/mcp/README.md` 增加故障排查章节
-- [ ] 为 PostgreSQL launcher 增加版本可配置与校验和校验
 - [ ] 增加连接命令脱敏开关，避免共享环境直接展示敏感信息
 - [ ] 增加 MCP resources 浏览能力，补齐“工具之外的 schema 资源”查看
 - [ ] 为默认参数生成逻辑补前端单测
+- [ ] 如果未来需要更强 PostgreSQL MCP，优先评估 npm 无状态实现；若必须引入状态化 server，则先改会话复用架构

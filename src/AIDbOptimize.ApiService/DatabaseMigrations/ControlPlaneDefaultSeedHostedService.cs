@@ -1,10 +1,10 @@
+using System.Text.Json;
 using AIDbOptimize.Domain.Mcp.Enums;
 using AIDbOptimize.Infrastructure.Persistence;
 using AIDbOptimize.Infrastructure.Persistence.Entities;
 using Microsoft.EntityFrameworkCore;
 using MySqlConnector;
 using Npgsql;
-using System.Text.Json;
 
 namespace AIDbOptimize.ApiService.DatabaseMigrations;
 
@@ -29,9 +29,9 @@ internal sealed class ControlPlaneDefaultSeedHostedService(
             engine: DatabaseEngine.PostgreSql,
             displayName: "PostgreSQL 测试库",
             databaseName: "aidbopt_lab_pg",
-            serverCommand: ResolvePowerShellCommand(),
-            serverArgumentsJson: BuildPostgreSqlArgumentsJson(),
-            environmentJson: BuildPostgreSqlEnvironmentJson(postgreSqlConnectionString),
+            serverCommand: "npx",
+            serverArgumentsJson: BuildPostgreSqlArgumentsJson(postgreSqlConnectionString),
+            environmentJson: "{}",
             databaseConnectionString: postgreSqlConnectionString,
             isDefault: true,
             cancellationToken: cancellationToken);
@@ -97,20 +97,7 @@ internal sealed class ControlPlaneDefaultSeedHostedService(
         entity.UpdatedAt = DateTimeOffset.UtcNow;
     }
 
-    private static string BuildPostgreSqlArgumentsJson()
-    {
-        var launcherPath = Path.Combine(AppContext.BaseDirectory, "postgresql-mcp-launcher.ps1");
-        return JsonSerializer.Serialize(new[]
-        {
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-File",
-            launcherPath
-        });
-    }
-
-    private static string BuildPostgreSqlEnvironmentJson(string connectionString)
+    private static string BuildPostgreSqlArgumentsJson(string connectionString)
     {
         var builder = new NpgsqlConnectionStringBuilder(connectionString);
         var password = Uri.EscapeDataString(builder.Password ?? string.Empty);
@@ -120,9 +107,11 @@ internal sealed class ControlPlaneDefaultSeedHostedService(
         var port = builder.Port;
         var url = $"postgresql://{userName}:{password}@{host}:{port}/{database}";
 
-        return JsonSerializer.Serialize(new Dictionary<string, string>
+        return JsonSerializer.Serialize(new[]
         {
-            ["POSTGRES_URL"] = url
+            "-y",
+            "@modelcontextprotocol/server-postgres",
+            url
         });
     }
 
@@ -138,11 +127,6 @@ internal sealed class ControlPlaneDefaultSeedHostedService(
             ["MYSQL_PASSWORD"] = builder.Password ?? string.Empty,
             ["MYSQL_DATABASE"] = builder.Database ?? string.Empty
         });
-    }
-
-    private static string ResolvePowerShellCommand()
-    {
-        return OperatingSystem.IsWindows() ? "powershell" : "pwsh";
     }
 
     private static string ResolveConnectionString(

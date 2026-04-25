@@ -13,8 +13,7 @@
 
 ### 1.2 当前默认 MCP 连接
 
-- PostgreSQL 默认连接使用 `sgaunet/postgresql-mcp`
-  通过 `postgresql-mcp-launcher.ps1` 自动下载并缓存 Windows 二进制
+- PostgreSQL 默认连接使用 `@modelcontextprotocol/server-postgres`
 - MySQL 默认连接使用 `mysql-mcp-server`
 
 ## 2. 项目职责
@@ -44,7 +43,6 @@
 - HTTP API 暴露
 - 控制面数据库自动迁移
 - 默认 MCP 连接种子
-- PostgreSQL MCP launcher 脚本随输出目录复制
 
 ### `AIDbOptimize.DataInit`
 
@@ -67,43 +65,30 @@
 
 当前已接入：
 
-- PostgreSQL 默认连接：`sgaunet/postgresql-mcp`
+- PostgreSQL 默认连接：`@modelcontextprotocol/server-postgres`
 - MySQL 默认连接：`mysql-mcp-server`
 - stdio MCP 会话工厂：`McpClientFactory`
 - 短生命周期会话包装：`McpProcessSession`
 - 工具发现：真实 `tools/list`
 - 工具执行：真实 `tools/call`
 
-### 3.2 PostgreSQL 默认连接设计
+### 3.2 为什么 PostgreSQL 当前选择 npm 无状态实现
 
-默认 PostgreSQL 连接不再直接调用 npm 包，而是走 launcher：
+当前系统的 MCP 调用模型是“短生命周期会话”：
 
-```text
-powershell
-  -NoProfile
-  -ExecutionPolicy Bypass
-  -File <output>/postgresql-mcp-launcher.ps1
-```
+- 获取工具时创建一次会话
+- 执行工具时再次创建一次会话
 
-环境变量：
+因此默认 PostgreSQL MCP server 必须尽量满足：
 
-- `POSTGRES_URL`
+- 无状态
+- 单次调用即可完成
 
-launcher 负责：
-
-1. 检查 `%LOCALAPPDATA%\AIDbOptimize\tools\postgresql-mcp`
-2. 若不存在目标版本二进制，则从 GitHub Releases 下载
-3. 启动 `postgresql-mcp_0.3.0_windows_amd64.exe`
-
-这样做的目的：
-
-- 避免要求开发机预装 Go
-- 避免要求手工下载 exe
-- 保持默认连接可直接工作
+`@modelcontextprotocol/server-postgres` 更符合这个模型。
 
 ### 3.3 当前实现边界
 
-- PostgreSQL 当前默认 server 仍然是只读导向
+- PostgreSQL 当前默认工具主要是只读 `query`
 - MySQL 默认 server 仍然是社区 `mysql-mcp-server`
 - 前端已支持真实调用，但还不是多连接、多策略、多租户级别的管理台
 
@@ -113,7 +98,6 @@ launcher 负责：
 src/
 ├── AIDbOptimize.ApiService/
 │   ├── Program.cs
-│   ├── postgresql-mcp-launcher.ps1
 │   ├── Api/McpApi.cs
 │   └── DatabaseMigrations/ControlPlaneDefaultSeedHostedService.cs
 ├── AIDbOptimize.Application/

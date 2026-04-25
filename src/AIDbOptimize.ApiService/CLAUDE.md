@@ -11,7 +11,6 @@ AIDbOptimize.ApiService/
 ├── CLAUDE.md
 ├── AIDbOptimize.ApiService.csproj
 ├── Program.cs
-├── postgresql-mcp-launcher.ps1
 ├── Api/
 │   └── McpApi.cs
 └── DatabaseMigrations/
@@ -26,10 +25,8 @@ AIDbOptimize.ApiService/
   MCP 管理相关 HTTP 接口。
 - `DatabaseMigrations/ControlPlaneDefaultSeedHostedService.cs`
   控制面数据库默认 MCP 连接种子，当前在这里定义 PostgreSQL / MySQL 默认连接。
-- `postgresql-mcp-launcher.ps1`
-  PostgreSQL 默认 MCP launcher。首次运行时自动下载并缓存 `sgaunet/postgresql-mcp` Windows 二进制，再用 `POSTGRES_URL` 启动。
 - `AIDbOptimize.ApiService.csproj`
-  项目依赖和内容文件复制规则，当前负责把 `postgresql-mcp-launcher.ps1` 复制到输出目录。
+  项目依赖与构建配置。
 
 ## 依赖关系
 
@@ -41,9 +38,8 @@ AIDbOptimize.ApiService/
 
 ## 架构约束
 
-- 默认 PostgreSQL MCP 连接不依赖开发机预装 Go。
+- 默认 PostgreSQL MCP 连接使用 npm 无状态实现 `@modelcontextprotocol/server-postgres`。
 - 如需切换默认 PostgreSQL MCP server，必须同时更新：
   - `ControlPlaneDefaultSeedHostedService.cs`
-  - `postgresql-mcp-launcher.ps1`
   - `docs/mcp/README.md`
   - 本文件

@@ -21,10 +21,4 @@
     <ProjectReference Include="..\AIDbOptimize.Infrastructure\AIDbOptimize.Infrastructure.csproj" />
   </ItemGroup>
 
-  <ItemGroup>
-    <Content Include="postgresql-mcp-launcher.ps1">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-  </ItemGroup>
-
 </Project>
