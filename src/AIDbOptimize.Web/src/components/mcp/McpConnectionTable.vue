@@ -27,19 +27,31 @@ function resolveStatusName(status: number): string {
 
   return 'Draft'
 }
+
+function formatDiscoveredAt(value: string | null): string {
+  if (!value) {
+    return '未发现'
+  }
+
+  return new Date(value).toLocaleString('zh-CN', {
+    hour12: false,
+  })
+}
 </script>
 
 <template>
   <article class="panel">
     <h2>MCP 连接</h2>
-    <p class="state-text" v-if="loading">正在加载默认 MCP 连接...</p>
+    <p class="state-text" v-if="loading">正在加载 MCP 连接...</p>
     <div v-else class="table-card">
-      <table class="data-table">
+      <table class="data-table connection-table">
         <thead>
           <tr>
-            <th>展示名</th>
+            <th>显示名称</th>
             <th>引擎</th>
             <th>数据库</th>
+            <th class="command-column">真实连接命令</th>
+            <th>最近发现</th>
             <th>状态</th>
             <th>操作</th>
           </tr>
@@ -56,9 +68,26 @@ function resolveStatusName(status: number): string {
             </td>
             <td>{{ resolveEngineName(connection.engine) }}</td>
             <td>{{ connection.databaseName }}</td>
+            <td class="command-cell">
+              <code class="command-line">{{ connection.commandLine }}</code>
+              <details v-if="connection.environmentEntries.length" class="command-details">
+                <summary>环境变量 {{ connection.environmentEntries.length }} 项</summary>
+                <div class="command-env-list">
+                  <code
+                    v-for="entry in connection.environmentEntries"
+                    :key="entry"
+                    class="command-env-item"
+                  >
+                    {{ entry }}
+                  </code>
+                </div>
+              </details>
+              <span v-else class="cell-sub">无需额外环境变量</span>
+            </td>
+            <td>{{ formatDiscoveredAt(connection.lastDiscoveredAt) }}</td>
             <td>{{ resolveStatusName(connection.status) }}</td>
             <td class="cell-actions">
-              <button type="button" @click="emit('select', connection.id)">查看工具</button>
+              <button type="button" @click="emit('select', connection.id)">查询工具</button>
               <button type="button" class="secondary" @click="emit('discover', connection.id)">获取工具</button>
             </td>
           </tr>

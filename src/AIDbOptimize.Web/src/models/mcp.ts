@@ -4,6 +4,9 @@ export interface McpConnection {
   engine: number
   displayName: string
   databaseName: string
+  commandPreview: string
+  commandLine: string
+  environmentEntries: string[]
   isDefault: boolean
   status: number
   lastDiscoveredAt: string | null
@@ -15,6 +18,7 @@ export interface McpTool {
   toolName: string
   displayName: string
   description: string | null
+  inputSchemaJson: string
   approvalMode: number
   isEnabled: boolean
   isWriteTool: boolean

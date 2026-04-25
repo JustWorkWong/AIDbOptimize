@@ -3,6 +3,8 @@ using AIDbOptimize.Application.Abstractions.Persistence;
 using AIDbOptimize.Application.Mcp.Dtos;
 using AIDbOptimize.Domain.Mcp.Enums;
 using AIDbOptimize.Domain.Mcp.Models;
+using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace AIDbOptimize.Application.Mcp.Services;
 
@@ -63,7 +65,7 @@ public sealed class McpDiscoveryAppService(
                 now))
             .ToArray();
 
-        await toolRepository.UpsertManyAsync(records, cancellationToken);
+        var persistedRecords = await toolRepository.UpsertManyAsync(records, cancellationToken);
         await connectionRepository.UpdateAsync(
             connection with
             {
@@ -72,7 +74,7 @@ public sealed class McpDiscoveryAppService(
             },
             cancellationToken);
 
-        return records.Select(record => McpToolDto.FromDefinition(ToDefinition(record))).ToArray();
+        return persistedRecords.Select(record => McpToolDto.FromDefinition(ToDefinition(record))).ToArray();
     }
 
     /// <summary>
@@ -116,13 +118,31 @@ public sealed class McpDiscoveryAppService(
     {
         return string.IsNullOrWhiteSpace(json)
             ? []
-            : System.Text.Json.JsonSerializer.Deserialize<List<string>>(json) ?? [];
+            : DeserializeJson<List<string>>(json) ?? [];
     }
 
     private static IReadOnlyDictionary<string, string> DeserializeDictionary(string json)
     {
         return string.IsNullOrWhiteSpace(json)
             ? new Dictionary<string, string>()
-            : System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(json) ?? new Dictionary<string, string>();
+            : DeserializeJson<Dictionary<string, string>>(json) ?? new Dictionary<string, string>();
+    }
+
+    private static T? DeserializeJson<T>(string json)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<T>(json);
+        }
+        catch (JsonException)
+        {
+            var normalizedJson = NormalizeInvalidBackslashes(json);
+            return JsonSerializer.Deserialize<T>(normalizedJson);
+        }
+    }
+
+    private static string NormalizeInvalidBackslashes(string json)
+    {
+        return Regex.Replace(json, """\\(?!["\\/bfnrtu])""", @"\\");
     }
 }

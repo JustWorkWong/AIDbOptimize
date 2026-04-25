@@ -54,13 +54,14 @@ const mcpConnections = ref<McpConnection[]>([])
 const selectedConnectionId = ref('')
 const toolsLoading = ref(false)
 const tools = ref<McpTool[]>([])
+const savingApprovalToolId = ref('')
 const initStatusesLoading = ref(true)
 const initStatuses = ref<DataInitializationStatus[]>([])
 
 const resourceLinks = computed<ResourceLink[]>(() => [
   {
     title: 'API 健康检查',
-    description: '确认后端 API 是否已经成功启动。',
+    description: '确认后端 API 是否成功启动。',
     href: '/health',
   },
   {
@@ -125,6 +126,10 @@ const injectedServiceCount = computed(() => {
   return overview.value?.services.filter((service) => service.isConfigured).length ?? 0
 })
 
+const selectedConnection = computed(() => {
+  return mcpConnections.value.find((connection) => connection.id === selectedConnectionId.value) ?? null
+})
+
 onMounted(async () => {
   await Promise.all([
     loadInfrastructureOverview(),
@@ -149,13 +154,23 @@ async function loadInfrastructureOverview(): Promise<void> {
 }
 
 async function loadMcpConnections(): Promise<void> {
+  mcpErrorMessage.value = ''
+
   try {
-    mcpConnections.value = await getMcpConnections()
-    selectedConnectionId.value = mcpConnections.value[0]?.id ?? ''
+    const connections = await getMcpConnections()
+    mcpConnections.value = connections
+
+    const selectedStillExists = connections.some((connection) => connection.id === selectedConnectionId.value)
+    if (!selectedStillExists) {
+      selectedConnectionId.value = connections[0]?.id ?? ''
+    }
 
     if (selectedConnectionId.value) {
       await loadTools(selectedConnectionId.value)
+      return
     }
+
+    tools.value = []
   } catch (error) {
     mcpErrorMessage.value = error instanceof Error ? error.message : '加载 MCP 连接失败'
   } finally {
@@ -165,6 +180,7 @@ async function loadMcpConnections(): Promise<void> {
 
 async function loadTools(connectionId: string): Promise<void> {
   toolsLoading.value = true
+  mcpErrorMessage.value = ''
 
   try {
     tools.value = await getConnectionTools(connectionId)
@@ -177,10 +193,12 @@ async function loadTools(connectionId: string): Promise<void> {
 
 async function handleDiscover(connectionId: string): Promise<void> {
   toolsLoading.value = true
+  mcpErrorMessage.value = ''
+  selectedConnectionId.value = connectionId
 
   try {
     tools.value = await discoverConnectionTools(connectionId)
-    selectedConnectionId.value = connectionId
+    mcpConnections.value = await getMcpConnections()
   } catch (error) {
     mcpErrorMessage.value = error instanceof Error ? error.message : '获取工具失败'
   } finally {
@@ -193,7 +211,10 @@ async function handleSelectConnection(connectionId: string): Promise<void> {
   await loadTools(connectionId)
 }
 
-async function handleApprovalChange(toolId: string, approvalMode: number): Promise<void> {
+async function handleApprovalSave(toolId: string, approvalMode: number): Promise<void> {
+  savingApprovalToolId.value = toolId
+  mcpErrorMessage.value = ''
+
   try {
     await updateToolApprovalMode(toolId, approvalMode)
     const tool = tools.value.find((item) => item.id === toolId)
@@ -201,7 +222,9 @@ async function handleApprovalChange(toolId: string, approvalMode: number): Promi
       tool.approvalMode = approvalMode
     }
   } catch (error) {
-    mcpErrorMessage.value = error instanceof Error ? error.message : '更新审批模式失败'
+    mcpErrorMessage.value = error instanceof Error ? error.message : '保存审批模式失败'
+  } finally {
+    savingApprovalToolId.value = ''
   }
 }
 
@@ -222,8 +245,8 @@ async function loadInitializationStatuses(): Promise<void> {
       <p class="eyebrow">Aspire 中文开发骨架</p>
       <h1>AIDbOptimize</h1>
       <p class="hero-copy">
-        当前页面分成“资源概览”和“MCP 管理”两部分。
-        资源概览用于确认基础设施是否已编排完成，MCP 管理用于查看默认连接、发现工具、调整审批模式和观察初始化状态。
+        当前页面分成“资源概览”和“MCP 管理”两部分。资源概览用于确认基础设施是否编排完成，
+        MCP 管理用于查看默认连接、查询工具快照、实时获取工具、保存审批模式，以及验证通用工具执行链路。
       </p>
 
       <div class="hero-stats">
@@ -276,7 +299,7 @@ async function loadInitializationStatuses(): Promise<void> {
             </div>
             <div class="tip-card">
               <strong>默认账号</strong>
-              <span>默认账号和密码统一写在 README 中，页面不直接显示密码。</span>
+              <span>默认账号和密码统一记录在 README 中，页面不直接展示密码。</span>
             </div>
           </div>
         </article>
@@ -356,6 +379,25 @@ async function loadInitializationStatuses(): Promise<void> {
 
     <template v-else>
       <p v-if="mcpErrorMessage" class="state-text error">{{ mcpErrorMessage }}</p>
+
+      <section class="panel">
+        <h2>MCP 使用规则</h2>
+        <div class="tips-grid">
+          <div class="tip-card">
+            <strong>查询工具</strong>
+            <span>从控制面数据库读取最近一次发现并落库的工具快照。</span>
+          </div>
+          <div class="tip-card">
+            <strong>获取工具</strong>
+            <span>实时连接 MCP Server 调用 `tools/list`，然后把结果回写数据库。</span>
+          </div>
+          <div class="tip-card">
+            <strong>审批模式</strong>
+            <span>修改下拉框后需要点击“保存”才会真正落库。</span>
+          </div>
+        </div>
+      </section>
+
       <section class="panel-grid">
         <McpConnectionTable
           :connections="mcpConnections"
@@ -374,9 +416,13 @@ async function loadInitializationStatuses(): Promise<void> {
         <McpToolTable
           :tools="tools"
           :loading="toolsLoading"
-          @change-approval="handleApprovalChange"
+          :saving-tool-id="savingApprovalToolId"
+          @save-approval="handleApprovalSave"
         />
-        <McpToolExecutor :tools="tools" />
+        <McpToolExecutor
+          :tools="tools"
+          :connection="selectedConnection"
+        />
       </section>
     </template>
   </main>

@@ -11,7 +11,7 @@ public interface IMcpToolRepository
 
     Task<McpToolRecord?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
 
-    Task UpsertManyAsync(IReadOnlyCollection<McpToolRecord> tools, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<McpToolRecord>> UpsertManyAsync(IReadOnlyCollection<McpToolRecord> tools, CancellationToken cancellationToken = default);
 
     Task UpdateApprovalModeAsync(Guid id, ToolApprovalMode approvalMode, CancellationToken cancellationToken = default);
 }

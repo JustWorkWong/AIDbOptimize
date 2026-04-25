@@ -42,9 +42,10 @@ public sealed class McpToolRepository(IDbContextFactory<ControlPlaneDbContext> d
     /// <summary>
     /// 批量新增或更新工具定义。
     /// </summary>
-    public async Task UpsertManyAsync(IReadOnlyCollection<McpToolRecord> tools, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<McpToolRecord>> UpsertManyAsync(IReadOnlyCollection<McpToolRecord> tools, CancellationToken cancellationToken = default)
     {
         await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var persisted = new List<McpToolRecord>(tools.Count);
 
         foreach (var record in tools)
         {
@@ -55,20 +56,22 @@ public sealed class McpToolRepository(IDbContextFactory<ControlPlaneDbContext> d
 
             if (entity is null)
             {
-                dbContext.McpTools.Add(ToEntity(record));
+                var created = ToEntity(record);
+                dbContext.McpTools.Add(created);
+                persisted.Add(ToRecord(created));
                 continue;
             }
 
             entity.DisplayName = record.DisplayName;
             entity.Description = record.Description;
             entity.InputSchemaJson = record.InputSchemaJson;
-            entity.ApprovalMode = record.ApprovalMode;
-            entity.IsEnabled = record.IsEnabled;
             entity.IsWriteTool = record.IsWriteTool;
             entity.UpdatedAt = record.UpdatedAt;
+            persisted.Add(ToRecord(entity));
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
+        return persisted;
     }
 
     /// <summary>
@@ -118,5 +121,21 @@ public sealed class McpToolRepository(IDbContextFactory<ControlPlaneDbContext> d
             CreatedAt = record.CreatedAt,
             UpdatedAt = record.UpdatedAt
         };
+    }
+
+    private static McpToolRecord ToRecord(McpToolEntity entity)
+    {
+        return new McpToolRecord(
+            entity.Id,
+            entity.ConnectionId,
+            entity.ToolName,
+            entity.DisplayName,
+            entity.Description,
+            entity.InputSchemaJson,
+            entity.ApprovalMode,
+            entity.IsEnabled,
+            entity.IsWriteTool,
+            entity.CreatedAt,
+            entity.UpdatedAt);
     }
 }

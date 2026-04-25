@@ -12,6 +12,7 @@ public sealed record McpToolDto(
     string ToolName,
     string DisplayName,
     string? Description,
+    string InputSchemaJson,
     ToolApprovalMode ApprovalMode,
     bool IsEnabled,
     bool IsWriteTool)
@@ -24,6 +25,7 @@ public sealed record McpToolDto(
             definition.ToolName,
             definition.DisplayName,
             definition.Description,
+            definition.InputSchemaJson,
             definition.ApprovalMode,
             definition.IsEnabled,
             definition.IsWriteTool);

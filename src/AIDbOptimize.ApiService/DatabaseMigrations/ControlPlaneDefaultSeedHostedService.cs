@@ -4,12 +4,12 @@ using AIDbOptimize.Infrastructure.Persistence.Entities;
 using Microsoft.EntityFrameworkCore;
 using MySqlConnector;
 using Npgsql;
+using System.Text.Json;
 
 namespace AIDbOptimize.ApiService.DatabaseMigrations;
 
 /// <summary>
-/// 控制面默认数据种子服务。
-/// 当前负责写入 PostgreSQL / MySQL 默认 MCP 连接，便于后续前端直接管理。
+/// Seeds default MCP connections into the control plane database.
 /// </summary>
 internal sealed class ControlPlaneDefaultSeedHostedService(
     IDbContextFactory<ControlPlaneDbContext> dbContextFactory,
@@ -29,9 +29,9 @@ internal sealed class ControlPlaneDefaultSeedHostedService(
             engine: DatabaseEngine.PostgreSql,
             displayName: "PostgreSQL 测试库",
             databaseName: "aidbopt_lab_pg",
-            serverCommand: "npx",
-            serverArgumentsJson: BuildPostgreSqlArgumentsJson(postgreSqlConnectionString),
-            environmentJson: "{}",
+            serverCommand: ResolvePowerShellCommand(),
+            serverArgumentsJson: BuildPostgreSqlArgumentsJson(),
+            environmentJson: BuildPostgreSqlEnvironmentJson(postgreSqlConnectionString),
             databaseConnectionString: postgreSqlConnectionString,
             isDefault: true,
             cancellationToken: cancellationToken);
@@ -50,7 +50,7 @@ internal sealed class ControlPlaneDefaultSeedHostedService(
             cancellationToken: cancellationToken);
 
         await dbContext.SaveChangesAsync(cancellationToken);
-        logger.LogInformation("控制面默认 MCP 连接已检查并补齐。");
+        logger.LogInformation("Default MCP connections are ready.");
     }
 
     public Task StopAsync(CancellationToken cancellationToken)
@@ -58,9 +58,6 @@ internal sealed class ControlPlaneDefaultSeedHostedService(
         return Task.CompletedTask;
     }
 
-    /// <summary>
-    /// 插入或更新一条默认连接配置。
-    /// </summary>
     private static async Task UpsertConnectionAsync(
         ControlPlaneDbContext dbContext,
         string name,
@@ -100,10 +97,20 @@ internal sealed class ControlPlaneDefaultSeedHostedService(
         entity.UpdatedAt = DateTimeOffset.UtcNow;
     }
 
-    /// <summary>
-    /// 将 Npgsql 连接串转换为官方 postgres MCP server 所需的 URL 参数。
-    /// </summary>
-    private static string BuildPostgreSqlArgumentsJson(string connectionString)
+    private static string BuildPostgreSqlArgumentsJson()
+    {
+        var launcherPath = Path.Combine(AppContext.BaseDirectory, "postgresql-mcp-launcher.ps1");
+        return JsonSerializer.Serialize(new[]
+        {
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            launcherPath
+        });
+    }
+
+    private static string BuildPostgreSqlEnvironmentJson(string connectionString)
     {
         var builder = new NpgsqlConnectionStringBuilder(connectionString);
         var password = Uri.EscapeDataString(builder.Password ?? string.Empty);
@@ -113,26 +120,29 @@ internal sealed class ControlPlaneDefaultSeedHostedService(
         var port = builder.Port;
         var url = $"postgresql://{userName}:{password}@{host}:{port}/{database}";
 
-        return $$"""["-y","@modelcontextprotocol/server-postgres","{{url}}"]""";
+        return JsonSerializer.Serialize(new Dictionary<string, string>
+        {
+            ["POSTGRES_URL"] = url
+        });
     }
 
-    /// <summary>
-    /// 将 MySQL 连接串转换为社区 mysql MCP server 所需的环境变量。
-    /// 这里使用支持固定端口的 mysql-mcp-server，便于兼容当前 13306 端口。
-    /// </summary>
     private static string BuildMySqlEnvironmentJson(string connectionString)
     {
         var builder = new MySqlConnectionStringBuilder(connectionString);
 
-        return $$"""
+        return JsonSerializer.Serialize(new Dictionary<string, string>
         {
-          "MYSQL_HOST": "{{builder.Server}}",
-          "MYSQL_PORT": "{{builder.Port}}",
-          "MYSQL_USER": "{{builder.UserID}}",
-          "MYSQL_PASSWORD": "{{builder.Password}}",
-          "MYSQL_DATABASE": "{{builder.Database}}"
-        }
-        """;
+            ["MYSQL_HOST"] = builder.Server,
+            ["MYSQL_PORT"] = builder.Port.ToString(),
+            ["MYSQL_USER"] = builder.UserID ?? string.Empty,
+            ["MYSQL_PASSWORD"] = builder.Password ?? string.Empty,
+            ["MYSQL_DATABASE"] = builder.Database ?? string.Empty
+        });
+    }
+
+    private static string ResolvePowerShellCommand()
+    {
+        return OperatingSystem.IsWindows() ? "powershell" : "pwsh";
     }
 
     private static string ResolveConnectionString(

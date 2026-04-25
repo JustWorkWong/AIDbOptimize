@@ -223,6 +223,10 @@ code {
   overflow-x: auto;
 }
 
+.connection-table {
+  min-width: 1080px;
+}
+
 .data-table {
   width: 100%;
   border-collapse: collapse;
@@ -241,6 +245,11 @@ code {
   font-size: 0.84rem;
 }
 
+.command-column,
+.command-cell {
+  min-width: 24rem;
+}
+
 .data-table tr.selected {
   background: rgba(42, 157, 143, 0.08);
 }
@@ -256,6 +265,38 @@ code {
   display: flex;
   gap: 0.5rem;
   flex-wrap: wrap;
+}
+
+.command-line,
+.command-env-item {
+  display: block;
+  width: 100%;
+  padding: 0.5rem 0.65rem;
+  border-radius: 0.8rem;
+  background: rgba(20, 33, 61, 0.08);
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  white-space: normal;
+  word-break: normal;
+  overflow-wrap: anywhere;
+}
+
+.command-details {
+  margin-top: 0.5rem;
+}
+
+.command-details summary {
+  color: #355070;
+  cursor: pointer;
+  font-size: 0.84rem;
+}
+
+.command-env-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  margin-top: 0.6rem;
 }
 
 .inline-select {
