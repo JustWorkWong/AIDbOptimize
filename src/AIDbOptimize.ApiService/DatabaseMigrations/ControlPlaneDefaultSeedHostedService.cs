@@ -2,6 +2,7 @@ using System.Text.Json;
 using AIDbOptimize.Domain.Mcp.Enums;
 using AIDbOptimize.Infrastructure.Persistence;
 using AIDbOptimize.Infrastructure.Persistence.Entities;
+using AIDbOptimize.Infrastructure.Security;
 using Microsoft.EntityFrameworkCore;
 using MySqlConnector;
 using Npgsql;
@@ -14,6 +15,7 @@ namespace AIDbOptimize.ApiService.DatabaseMigrations;
 internal sealed class ControlPlaneDefaultSeedHostedService(
     IDbContextFactory<ControlPlaneDbContext> dbContextFactory,
     IConfiguration configuration,
+    IConnectionSecretProtector secretProtector,
     ILogger<ControlPlaneDefaultSeedHostedService> logger) : IHostedService
 {
     public async Task StartAsync(CancellationToken cancellationToken)
@@ -58,7 +60,7 @@ internal sealed class ControlPlaneDefaultSeedHostedService(
         return Task.CompletedTask;
     }
 
-    private static async Task UpsertConnectionAsync(
+    private async Task UpsertConnectionAsync(
         ControlPlaneDbContext dbContext,
         string name,
         DatabaseEngine engine,
@@ -87,9 +89,9 @@ internal sealed class ControlPlaneDefaultSeedHostedService(
         entity.Engine = engine;
         entity.DisplayName = displayName;
         entity.ServerCommand = serverCommand;
-        entity.ServerArgumentsJson = serverArgumentsJson;
-        entity.EnvironmentJson = environmentJson;
-        entity.DatabaseConnectionString = databaseConnectionString;
+        entity.ServerArgumentsJson = secretProtector.ProtectIfNeeded(serverArgumentsJson);
+        entity.EnvironmentJson = secretProtector.ProtectIfNeeded(environmentJson);
+        entity.DatabaseConnectionString = secretProtector.ProtectIfNeeded(databaseConnectionString);
         entity.DatabaseName = databaseName;
         entity.IsDefault = isDefault;
         entity.Status = McpConnectionStatus.Draft;

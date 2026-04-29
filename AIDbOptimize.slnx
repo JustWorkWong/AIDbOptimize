@@ -7,4 +7,8 @@
     <Project Path="src/AIDbOptimize.Domain/AIDbOptimize.Domain.csproj" />
     <Project Path="src/AIDbOptimize.Infrastructure/AIDbOptimize.Infrastructure.csproj" />
   </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/AIDbOptimize.ApiService.Tests/AIDbOptimize.ApiService.Tests.csproj" />
+    <Project Path="tests/AIDbOptimize.Infrastructure.Tests/AIDbOptimize.Infrastructure.Tests.csproj" />
+  </Folder>
 </Solution>

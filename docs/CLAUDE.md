@@ -16,6 +16,10 @@ docs/
 └── plans/
     ├── README.md
     └── active/
+        ├── 2026-04-aidboptimize-db-config-workflow/
+        │   ├── design.md
+        │   ├── detailed-design.md
+        │   └── tasks.md
         └── 2026-04-aidboptimize-ddd-mcp-seeding/
             ├── design.md
             ├── detailed-design.md
@@ -32,6 +36,8 @@ docs/
   `docs/mcp/` 子目录的边界、文件用途和后续扩展规则。
 - `plans/README.md`
   计划类文档的约束说明。
+- `plans/active/2026-04-aidboptimize-db-config-workflow/`
+  数据库配置优化 workflow 的总体方案、详细设计和任务拆解，覆盖 MAF workflow、agent 持久化、审核恢复、OTel、安全与前后端契约。
 - `plans/active/...`
   正在推进的方案设计、细化设计和任务拆解。
 

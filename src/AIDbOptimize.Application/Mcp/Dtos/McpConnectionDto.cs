@@ -1,5 +1,6 @@
 using AIDbOptimize.Domain.Mcp.Enums;
 using AIDbOptimize.Domain.Mcp.Models;
+using System.Text.RegularExpressions;
 
 namespace AIDbOptimize.Application.Mcp.Dtos;
 
@@ -22,14 +23,14 @@ public sealed record McpConnectionDto(
     public static McpConnectionDto FromDefinition(McpConnectionDefinition definition)
     {
         var environmentEntries = definition.EnvironmentVariables
-            .Select(pair => $"{pair.Key}={Quote(pair.Value)}")
+            .Select(pair => $"{pair.Key}={Quote(MaskFreeText(pair.Value))}")
             .OrderBy(value => value, StringComparer.OrdinalIgnoreCase)
             .ToArray();
 
         var commandLine = string.Join(
             " ",
             new[] { definition.ServerCommand }
-                .Concat(definition.ServerArguments.Select(Quote)));
+                .Concat(definition.ServerArguments.Select(argument => Quote(MaskFreeText(argument)))));
 
         var commandPreview = environmentEntries.Length == 0
             ? commandLine
@@ -59,5 +60,27 @@ public sealed record McpConnectionDto(
         return value.Any(char.IsWhiteSpace) || value.Contains('"')
             ? $"\"{value.Replace("\"", "\\\"", StringComparison.Ordinal)}\""
             : value;
+    }
+
+    private static string MaskFreeText(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        var masked = Regex.Replace(
+            value,
+            "(?i)(password|pwd)=([^;\\s]+)",
+            "$1=***");
+        masked = Regex.Replace(
+            masked,
+            "(?i)(api[_-]?key|secret|token)=([^;\\s]+)",
+            "$1=***");
+        masked = Regex.Replace(
+            masked,
+            "(?i)(://[^:]+:)([^@]+)(@)",
+            "$1***$3");
+        return masked;
     }
 }

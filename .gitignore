@@ -9,3 +9,5 @@ __pycache__/
 *.pyc
 *.user
 *.suo
+src/AIDbOptimize.ApiService/appsettings.Local.json
+.claude/

@@ -6,9 +6,9 @@
 
 - 使用 Aspire 统一编排后端 API、前端 Vite 应用和基础设施容器
 - 提供 `PostgreSQL`、`MySQL`、`Redis`、`RabbitMQ`
-- 所有资源都使用固定端口
+- 所有资源使用固定端口
 - 每个资源都带管理页面
-- 基础设施容器启用持久化卷，重启应用后数据仍然保留
+- 基础设施容器启用持久化卷，重启后数据仍然保留
 
 ## 设计与计划文档
 
@@ -16,11 +16,11 @@
 
 - [docs/README.md](./docs/README.md)
 
-当前活跃计划：
+当前唯一执行计划：
 
-- [DDD + MCP + 测试数据初始化设计方案](./docs/plans/active/2026-04-aidboptimize-ddd-mcp-seeding/design.md)
-- [DDD + MCP + 测试数据初始化详细设计方案](./docs/plans/active/2026-04-aidboptimize-ddd-mcp-seeding/detailed-design.md)
-- [DDD + MCP + 测试数据初始化任务清单](./docs/plans/active/2026-04-aidboptimize-ddd-mcp-seeding/tasks.md)
+- [数据库配置优化 workflow 总体方案](./docs/plans/active/2026-04-aidboptimize-db-config-workflow/design.md)
+- [数据库配置优化 workflow 详细设计](./docs/plans/active/2026-04-aidboptimize-db-config-workflow/detailed-design.md)
+- [数据库配置优化 workflow 任务清单](./docs/plans/active/2026-04-aidboptimize-db-config-workflow/tasks.md)
 
 ## 启动方式
 
@@ -30,14 +30,14 @@
 dotnet run --project .\src\AIDbOptimize.AppHost\AIDbOptimize.AppHost.csproj
 ```
 
-启动后可以通过 Aspire Dashboard 查看整体运行状态。
+启动后可通过 Aspire Dashboard 查看整体运行状态。
 
 ## 固定端口清单
 
 | 资源 | 端口 | 说明 |
 | --- | ---: | --- |
 | Aspire AppHost / Dashboard | `17200` | Aspire 本地入口 |
-| API | `17100` | ASP.NET Core 最小 API |
+| API | `17100` | ASP.NET Core API |
 | Web | `17101` | Vue 3 + Vite 前端 |
 | PostgreSQL | `15432` | PostgreSQL 数据库 |
 | pgAdmin | `15050` | PostgreSQL 管理面板 |
@@ -56,4 +56,4 @@ dotnet run --project .\src\AIDbOptimize.AppHost\AIDbOptimize.AppHost.csproj
 - API / Web 最小可运行项目
 - 文档目录与长期计划目录
 
-下一阶段的详细设计和执行顺序，请直接参考 `docs` 目录中的计划文档。
+后续执行顺序以仓库根 [CLAUDE.md](./CLAUDE.md) 和当前唯一任务清单为准。

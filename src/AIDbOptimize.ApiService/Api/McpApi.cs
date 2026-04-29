@@ -150,7 +150,16 @@ internal static class McpApiRouteBuilderExtensions
         CancellationToken cancellationToken)
     {
         using var document = JsonDocument.Parse(request.PayloadJson);
-        var result = await executionService.ExecuteAsync(toolId, document.RootElement.Clone(), cancellationToken);
+        var result = await executionService.ExecuteAsync(
+            new Application.Abstractions.Mcp.McpToolExecutionRequest(
+                toolId,
+                document.RootElement.Clone(),
+                null,
+                null,
+                "frontend",
+                "manual",
+                null),
+            cancellationToken);
         return Results.Ok(result);
     }
 

@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Text.RegularExpressions;
 using AIDbOptimize.ApiService.Api;
 using AIDbOptimize.ApiService.DatabaseMigrations;
@@ -6,10 +7,20 @@ using AIDbOptimize.Application.Abstractions.Mcp;
 using AIDbOptimize.Application.Abstractions.Persistence;
 using AIDbOptimize.Application.DataInitialization.Services;
 using AIDbOptimize.Application.Mcp.Services;
+using AIDbOptimize.Application.Workflows.Services;
+using AIDbOptimize.Infrastructure.Agents;
 using AIDbOptimize.Infrastructure.Mcp;
+using AIDbOptimize.Infrastructure.Observability;
 using AIDbOptimize.Infrastructure.Persistence;
 using AIDbOptimize.Infrastructure.Persistence.Repositories;
+using AIDbOptimize.Infrastructure.Security;
+using AIDbOptimize.Infrastructure.Workflows.Pipeline;
+using AIDbOptimize.Infrastructure.Workflows.Runtime;
+using AIDbOptimize.Infrastructure.Workflows.Services;
 using Microsoft.EntityFrameworkCore;
+using OpenTelemetry.Metrics;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -22,9 +33,52 @@ var controlPlaneConnectionString = ResolveConnectionString(
     "aidbopt-control",
     "ControlPlane",
     "Host=localhost;Port=15432;Username=postgres;Password=Postgres123!;Database=aidbopt_control");
+builder.Configuration.AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: true);
+var serviceName = builder.Environment.ApplicationName;
+var serviceVersion = ResolveServiceVersion();
+var diagnosisAgentOptions = builder.Configuration
+    .GetSection("AIDbOptimize:Agent:Diagnosis")
+    .Get<DbConfigDiagnosisAgentOptions>() ?? new DbConfigDiagnosisAgentOptions();
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
+builder.Services.AddDataProtection();
+builder.Services.AddSingleton(diagnosisAgentOptions);
+builder.Services.AddOpenTelemetry()
+    .ConfigureResource(resource =>
+    {
+        resource.AddService(
+            serviceName: serviceName,
+            serviceVersion: serviceVersion,
+            serviceInstanceId: Environment.MachineName);
+    })
+    .WithTracing(tracing =>
+    {
+        tracing
+            .AddAspNetCoreInstrumentation()
+            .AddHttpClientInstrumentation()
+            .AddEntityFrameworkCoreInstrumentation()
+            .AddSource(serviceName)
+            .AddSource(AIDbOptimizeTelemetry.WorkflowName)
+            .AddSource(AIDbOptimizeTelemetry.AgentName)
+            .AddSource(AIDbOptimizeTelemetry.ReviewName)
+            .AddSource(AIDbOptimizeTelemetry.McpName)
+            .AddOtlpExporter();
+    })
+    .WithMetrics(metrics =>
+    {
+        metrics
+            .AddAspNetCoreInstrumentation()
+            .AddHttpClientInstrumentation()
+            .AddRuntimeInstrumentation()
+            .AddProcessInstrumentation()
+            .AddMeter(serviceName)
+            .AddMeter(AIDbOptimizeTelemetry.WorkflowName)
+            .AddMeter(AIDbOptimizeTelemetry.AgentName)
+            .AddMeter(AIDbOptimizeTelemetry.ReviewName)
+            .AddMeter(AIDbOptimizeTelemetry.McpName)
+            .AddOtlpExporter();
+    });
 
 builder.Services.AddDbContextFactory<ControlPlaneDbContext>(options =>
     options.UseNpgsql(controlPlaneConnectionString));
@@ -33,15 +87,36 @@ builder.Services.AddHostedService<ControlPlaneMigrationHostedService>();
 builder.Services.AddHostedService<ControlPlaneDefaultSeedHostedService>();
 
 builder.Services.AddSingleton<McpClientFactory>();
+builder.Services.AddSingleton<IConnectionSecretProtector, ConnectionSecretProtector>();
 builder.Services.AddScoped<IMcpConnectionRepository, McpConnectionRepository>();
 builder.Services.AddScoped<IMcpToolRepository, McpToolRepository>();
 builder.Services.AddScoped<IDataInitializationRunRepository, DataInitializationRunRepository>();
+builder.Services.AddScoped<IWorkflowSessionRepository, WorkflowSessionRepository>();
+builder.Services.AddScoped<IWorkflowCheckpointRepository, WorkflowCheckpointRepository>();
+builder.Services.AddScoped<IWorkflowReviewTaskRepository, WorkflowReviewTaskRepository>();
+builder.Services.AddScoped<IWorkflowHistoryRepository, WorkflowHistoryRepository>();
+builder.Services.AddScoped<IAgentSessionPersistenceService, AgentSessionPersistenceService>();
+builder.Services.AddScoped<IAgentSummaryService, AgentSummaryService>();
+builder.Services.AddScoped<DbConfigInputValidationExecutor>();
+builder.Services.AddScoped<DbConfigSnapshotCollectorExecutor>();
+builder.Services.AddScoped<DbConfigRuleAnalysisExecutor>();
+builder.Services.AddScoped<DbConfigDiagnosisReportBuilder>();
+builder.Services.AddScoped<IDbConfigDiagnosisAgentExecutor, DbConfigDiagnosisAgentExecutor>();
+builder.Services.AddScoped<RecommendationSchemaValidator>();
+builder.Services.AddScoped<DbConfigGroundingExecutor>();
+builder.Services.AddScoped<ReviewAdjustmentValidator>();
+builder.Services.AddScoped<DbConfigHumanReviewGateExecutor>();
+builder.Services.AddScoped<IWorkflowRuntime, ControlPlaneWorkflowRuntime>();
 builder.Services.AddScoped<IMcpDiscoveryService, McpDiscoveryService>();
 builder.Services.AddScoped<IMcpToolExecutionService, McpToolExecutionService>();
 builder.Services.AddScoped<McpDiscoveryAppService>();
 builder.Services.AddScoped<McpToolPermissionAppService>();
 builder.Services.AddScoped<InitializationStatusAppService>();
 builder.Services.AddScoped<IAgentToolAssemblyService, AIDbOptimize.Infrastructure.Mcp.AgentToolAssemblyService>();
+builder.Services.AddScoped<IDbConfigOptimizationWorkflowService, DbConfigOptimizationWorkflowService>();
+builder.Services.AddScoped<IWorkflowReviewService, WorkflowReviewService>();
+builder.Services.AddScoped<IWorkflowHistoryService, WorkflowHistoryService>();
+builder.Services.AddHostedService<WorkflowRecoveryHostedService>();
 
 builder.Services.AddCors(options =>
 {
@@ -100,6 +175,10 @@ app.MapGet("/api/infrastructure", (IConfiguration configuration, IWebHostEnviron
 
 app.MapMcpApi();
 app.MapDataInitializationApi();
+app.MapWorkflowsApi();
+app.MapWorkflowEventsApi();
+app.MapReviewsApi();
+app.MapHistoryApi();
 
 app.Run();
 
@@ -148,6 +227,18 @@ static string ResolveConnectionString(
     return configuration.GetConnectionString(aspireName)
         ?? configuration.GetConnectionString(fallbackName)
         ?? defaultValue;
+}
+
+static string ResolveServiceVersion()
+{
+    var assembly = typeof(Program).Assembly;
+    var informationalVersion = assembly
+        .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
+        ?.InformationalVersion;
+
+    return informationalVersion?.Split('+')[0]
+        ?? assembly.GetName().Version?.ToString()
+        ?? "1.0.0";
 }
 
 internal sealed record InfrastructureOverviewResponse(

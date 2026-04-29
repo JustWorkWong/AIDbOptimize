@@ -1,13 +1,15 @@
+using System.Diagnostics;
 using System.Text.Json;
 using AIDbOptimize.Application.Abstractions.Mcp;
 using AIDbOptimize.Application.Abstractions.Persistence;
+using AIDbOptimize.Infrastructure.Observability;
+using AIDbOptimize.Infrastructure.Security;
 using Microsoft.EntityFrameworkCore;
 
 namespace AIDbOptimize.Infrastructure.Mcp;
 
 /// <summary>
-/// MCP 工具执行服务。
-/// 该服务会根据工具所属连接建立真实 MCP 会话，并调用 `tools/call` 执行工具。
+/// Executes MCP tools and persists an audit record.
 /// </summary>
 public sealed class McpToolExecutionService(
     IMcpToolRepository toolRepository,
@@ -15,46 +17,61 @@ public sealed class McpToolExecutionService(
     McpClientFactory clientFactory,
     IDbContextFactory<Persistence.ControlPlaneDbContext> dbContextFactory) : IMcpToolExecutionService
 {
-    /// <summary>
-    /// 执行指定工具，并把执行结果写入控制面数据库。
-    /// </summary>
-    public async Task<McpToolExecutionResult> ExecuteAsync(Guid toolId, JsonElement payload, CancellationToken cancellationToken = default)
+    public async Task<McpToolExecutionResult> ExecuteAsync(
+        McpToolExecutionRequest request,
+        CancellationToken cancellationToken = default)
     {
-        var tool = await toolRepository.GetByIdAsync(toolId, cancellationToken)
-            ?? throw new InvalidOperationException($"未找到 MCP 工具：{toolId}");
+        using var activity = AIDbOptimizeTelemetry.McpActivitySource.StartActivity("mcp.tool.execute");
+        activity?.SetTag("mcp.tool_id", request.ToolId);
+        activity?.SetTag("workflow.session_id", request.WorkflowSessionId);
+        activity?.SetTag("workflow.node_name", request.WorkflowNodeName);
+        activity?.SetTag("mcp.execution_scope", request.ExecutionScope);
+        var startedAt = Stopwatch.StartNew();
+        AIDbOptimizeTelemetry.McpToolExecutionStarted.Add(1);
+
+        var tool = await toolRepository.GetByIdAsync(request.ToolId, cancellationToken)
+            ?? throw new InvalidOperationException($"MCP tool not found: {request.ToolId}");
 
         var connection = await connectionRepository.GetByIdAsync(tool.ConnectionId, cancellationToken)
-            ?? throw new InvalidOperationException($"未找到 MCP 连接：{tool.ConnectionId}");
+            ?? throw new InvalidOperationException($"MCP connection not found: {tool.ConnectionId}");
 
         var executionId = Guid.NewGuid();
 
         try
         {
             await using var session = await clientFactory.CreateAsync(ToConnectionDefinition(connection), cancellationToken);
-            var arguments = ToArguments(payload);
+            var arguments = ToArguments(request.Payload);
             var result = await session.Client.CallToolAsync(tool.ToolName, arguments, cancellationToken: cancellationToken);
-            var responseJson = JsonSerializer.Serialize(result);
+            var responseJson = ToolOutputSanitizer.SanitizeJson(JsonSerializer.Serialize(result));
             var errorMessage = ExtractToolError(result);
             var status = string.IsNullOrWhiteSpace(errorMessage) ? "Succeeded" : "Failed";
 
-            await SaveExecutionAsync(executionId, connection.Id, tool.Id, payload, responseJson, status, errorMessage, cancellationToken);
+            await SaveExecutionAsync(executionId, connection.Id, tool.Id, request, responseJson, status, errorMessage, cancellationToken);
+            startedAt.Stop();
+            AIDbOptimizeTelemetry.McpToolExecutionDurationMs.Record(startedAt.Elapsed.TotalMilliseconds);
+            if (!string.Equals(status, "Succeeded", StringComparison.OrdinalIgnoreCase))
+            {
+                AIDbOptimizeTelemetry.McpToolExecutionFailed.Add(1);
+            }
+
             return new McpToolExecutionResult(executionId, status, responseJson, errorMessage);
         }
         catch (Exception ex)
         {
-            await SaveExecutionAsync(executionId, connection.Id, tool.Id, payload, "{}", "Failed", ex.Message, cancellationToken);
-            return new McpToolExecutionResult(executionId, "Failed", "{}", ex.Message);
+            var sanitizedMessage = SensitiveDataMasker.MaskFreeText(ex.Message);
+            await SaveExecutionAsync(executionId, connection.Id, tool.Id, request, "{}", "Failed", sanitizedMessage, cancellationToken);
+            startedAt.Stop();
+            AIDbOptimizeTelemetry.McpToolExecutionDurationMs.Record(startedAt.Elapsed.TotalMilliseconds);
+            AIDbOptimizeTelemetry.McpToolExecutionFailed.Add(1);
+            return new McpToolExecutionResult(executionId, "Failed", "{}", sanitizedMessage);
         }
     }
 
-    /// <summary>
-    /// 将执行结果落库，方便后续前端查询历史。
-    /// </summary>
     private async Task SaveExecutionAsync(
         Guid executionId,
         Guid connectionId,
         Guid toolId,
-        JsonElement payload,
+        McpToolExecutionRequest request,
         string responseJson,
         string status,
         string? errorMessage,
@@ -66,20 +83,21 @@ public sealed class McpToolExecutionService(
             Id = executionId,
             ConnectionId = connectionId,
             ToolId = toolId,
-            RequestedBy = "frontend",
-            RequestPayloadJson = payload.GetRawText(),
+            WorkflowSessionId = request.WorkflowSessionId,
+            WorkflowNodeName = request.WorkflowNodeName,
+            ExecutionScope = request.ExecutionScope,
+            TraceId = request.TraceId,
+            RequestedBy = string.IsNullOrWhiteSpace(request.RequestedBy) ? "frontend" : request.RequestedBy,
+            RequestPayloadJson = ToolOutputSanitizer.SanitizeJson(request.Payload.GetRawText()),
             ResponsePayloadJson = responseJson,
             Status = status,
-            ErrorMessage = errorMessage,
+            ErrorMessage = SensitiveDataMasker.MaskFreeText(errorMessage),
             CreatedAt = DateTimeOffset.UtcNow
         });
 
         await dbContext.SaveChangesAsync(cancellationToken);
     }
 
-    /// <summary>
-    /// 将轻量连接记录转换为跨层连接定义。
-    /// </summary>
     private static Domain.Mcp.Models.McpConnectionDefinition ToConnectionDefinition(McpConnectionRecord record)
     {
         return new Domain.Mcp.Models.McpConnectionDefinition(
@@ -97,14 +115,11 @@ public sealed class McpToolExecutionService(
             record.LastDiscoveredAt);
     }
 
-    /// <summary>
-    /// 将原始 JSON 参数转换为 MCP 客户端可接受的参数字典。
-    /// </summary>
     private static IReadOnlyDictionary<string, object?> ToArguments(JsonElement payload)
     {
         if (payload.ValueKind != JsonValueKind.Object)
         {
-            throw new InvalidOperationException("工具参数必须是 JSON 对象。");
+            throw new InvalidOperationException("Tool payload must be a JSON object.");
         }
 
         var result = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
@@ -116,10 +131,6 @@ public sealed class McpToolExecutionService(
         return result;
     }
 
-    /// <summary>
-    /// 从 MCP 调用结果中提取错误文本。
-    /// 如果没有显式错误，则返回 null。
-    /// </summary>
     private static string? ExtractToolError(ModelContextProtocol.Protocol.CallToolResult result)
     {
         if (result.IsError is not true)

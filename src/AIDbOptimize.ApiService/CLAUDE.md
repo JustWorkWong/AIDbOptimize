@@ -2,7 +2,7 @@
 
 ## 目录职责
 
-`AIDbOptimize.ApiService/` 负责对外暴露 HTTP API，并在启动阶段完成控制面数据库迁移与默认连接种子。
+`AIDbOptimize.ApiService/` 负责暴露 HTTP API、承接最薄的一层请求绑定与结果返回，并在启动阶段完成控制面数据库迁移和默认种子初始化。
 
 ## 当前结构
 
@@ -11,35 +11,34 @@ AIDbOptimize.ApiService/
 ├── CLAUDE.md
 ├── AIDbOptimize.ApiService.csproj
 ├── Program.cs
+├── appsettings.Local.json (local only, gitignored)
 ├── Api/
-│   └── McpApi.cs
-└── DatabaseMigrations/
-    └── ControlPlaneDefaultSeedHostedService.cs
+│   ├── DataInitializationApi.cs
+│   ├── HistoryApi.cs
+│   ├── McpApi.cs
+│   ├── ReviewsApi.cs
+│   ├── WorkflowEventsApi.cs
+│   └── WorkflowsApi.cs
+├── DatabaseMigrations/
+│   ├── ControlPlaneDefaultSeedHostedService.cs
+│   └── ControlPlaneMigrationHostedService.cs
+└── Properties/
+    └── launchSettings.json
 ```
 
 ## 文件用途
 
-- `Program.cs`
-  API 启动入口，负责依赖注入、Swagger、CORS、基础设施总览接口和 MCP API 注册。
-- `Api/McpApi.cs`
-  MCP 管理相关 HTTP 接口。
-- `DatabaseMigrations/ControlPlaneDefaultSeedHostedService.cs`
-  控制面数据库默认 MCP 连接种子，当前在这里定义 PostgreSQL / MySQL 默认连接。
-- `AIDbOptimize.ApiService.csproj`
-  项目依赖与构建配置。
+- `Program.cs`: 组合宿主、基础设施注册、中间件与 endpoint 映射入口。
+- `appsettings.Local.json`: 本地私有配置，当前用于注入 DashScope/Qwen diagnosis agent 配置，不提交远程。
+- `Api/DataInitializationApi.cs`: 暴露数据初始化状态查询。
+- `Api/McpApi.cs`: 暴露 MCP 连接、工具发现、执行与审批模式更新接口。
+- `Api/WorkflowsApi.cs`: 暴露数据库配置优化 workflow 启动、查询、列表与取消接口。
+- `Api/WorkflowEventsApi.cs`: 暴露 workflow 基于持久化事件的 SSE replay 接口。
+- `Api/ReviewsApi.cs`: 暴露 workflow review 任务查询与提交接口。
+- `Api/HistoryApi.cs`: 暴露 workflow 历史列表与详情接口。
+- `DatabaseMigrations/`: 启动期控制面数据库迁移与默认数据种子。
 
 ## 依赖关系
 
-- 依赖 `AIDbOptimize.Application/`
-  提供应用服务与抽象。
-- 依赖 `AIDbOptimize.Infrastructure/`
-  提供仓储、数据库、MCP client 与执行实现。
-- 对 `AIDbOptimize.Web/` 暴露 HTTP API。
-
-## 架构约束
-
-- 默认 PostgreSQL MCP 连接使用 npm 无状态实现 `@modelcontextprotocol/server-postgres`。
-- 如需切换默认 PostgreSQL MCP server，必须同时更新：
-  - `ControlPlaneDefaultSeedHostedService.cs`
-  - `docs/mcp/README.md`
-  - 本文件
+- `Api/* -> Application/*`: API 层只做参数绑定和结果封装，业务逻辑下沉到应用层接口。
+- `Program.cs -> Infrastructure/*`: 运行时注册和启动任务集中在组合根，不扩散到 route builder。

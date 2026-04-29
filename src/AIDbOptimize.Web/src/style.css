@@ -122,9 +122,23 @@ code {
   font-size: 1.25rem;
 }
 
+.panel-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: flex-start;
+  margin-bottom: 1rem;
+}
+
+.section-copy {
+  margin: 0;
+  color: #51627d;
+}
+
 .view-switch {
   display: flex;
   gap: 0.75rem;
+  flex-wrap: wrap;
 }
 
 .view-switch button,
@@ -139,6 +153,10 @@ code {
 
 .view-switch button.active {
   background: #2a9d8f;
+}
+
+.panel-header button.secondary {
+  background: #355070;
 }
 
 .cell-actions button.secondary {
@@ -340,6 +358,26 @@ code {
   resize: vertical;
 }
 
+.text-input {
+  width: 100%;
+  min-height: 2.75rem;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid rgba(20, 33, 61, 0.12);
+  border-radius: 0.9rem;
+  background: #ffffff;
+  color: #14213d;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.form-field-wide {
+  grid-column: 1 / -1;
+}
+
 .executor-actions {
   display: flex;
   gap: 0.75rem;
@@ -416,13 +454,149 @@ code {
   color: #b42318;
 }
 
+.workflow-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.workflow-list-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  width: 100%;
+  padding: 1rem;
+  border: 1px solid rgba(20, 33, 61, 0.08);
+  border-radius: 1rem;
+  background: #ffffff;
+  color: #14213d;
+  cursor: pointer;
+  text-align: left;
+}
+
+.workflow-list-item.active {
+  border-color: rgba(42, 157, 143, 0.55);
+  background: rgba(42, 157, 143, 0.08);
+}
+
+.workflow-list-item span,
+.workflow-list-item em,
+.review-summary-card span {
+  color: #51627d;
+  font-size: 0.92rem;
+}
+
+.workflow-list-item em {
+  font-style: normal;
+}
+
+.workflow-review-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.review-summary-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 1rem;
+  border: 1px solid rgba(20, 33, 61, 0.08);
+  border-radius: 1rem;
+  background: rgba(245, 247, 250, 0.9);
+}
+
+.review-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.9rem;
+  margin-top: 1rem;
+  margin-bottom: 1rem;
+}
+
+.compact-list {
+  margin-top: 1rem;
+}
+
+.review-action-box {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid rgba(20, 33, 61, 0.1);
+}
+
+.review-action-row {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.review-action-row button {
+  border: none;
+  border-radius: 999px;
+  padding: 0.7rem 1rem;
+  background: #14213d;
+  color: #ffffff;
+  cursor: pointer;
+}
+
+.review-action-row button.secondary {
+  background: #8d99ae;
+}
+
+.review-action-row button:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.replay-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.replay-item {
+  padding: 1rem;
+  border: 1px solid rgba(20, 33, 61, 0.08);
+  border-radius: 1rem;
+  background: #ffffff;
+}
+
+.replay-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: baseline;
+  margin-bottom: 0.5rem;
+}
+
+.replay-item p {
+  margin: 0 0 0.75rem;
+  color: #51627d;
+}
+
+.replay-item pre {
+  margin: 0;
+  padding: 0.9rem;
+  border-radius: 0.9rem;
+  background: rgba(20, 33, 61, 0.06);
+  overflow-x: auto;
+  font-size: 0.82rem;
+}
+
 @media (max-width: 900px) {
   .panel-grid,
   .link-grid,
   .tips-grid,
   .resource-card-grid,
   .hero-stats,
-  .status-grid {
+  .status-grid,
+  .form-grid,
+  .review-detail-grid,
+  .workflow-review-grid {
     grid-template-columns: 1fr;
   }
 

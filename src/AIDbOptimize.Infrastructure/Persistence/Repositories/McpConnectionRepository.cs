@@ -1,46 +1,40 @@
-using System.Linq.Expressions;
 using AIDbOptimize.Application.Abstractions.Persistence;
 using AIDbOptimize.Domain.Mcp.Models;
 using AIDbOptimize.Infrastructure.Persistence.Entities;
+using AIDbOptimize.Infrastructure.Security;
 using Microsoft.EntityFrameworkCore;
 
 namespace AIDbOptimize.Infrastructure.Persistence.Repositories;
 
 /// <summary>
-/// MCP 连接配置仓储实现。
+/// MCP connection repository implementation.
 /// </summary>
-public sealed class McpConnectionRepository(IDbContextFactory<ControlPlaneDbContext> dbContextFactory) : IMcpConnectionRepository
+public sealed class McpConnectionRepository(
+    IDbContextFactory<ControlPlaneDbContext> dbContextFactory,
+    IConnectionSecretProtector secretProtector) : IMcpConnectionRepository
 {
-    /// <summary>
-    /// 读取全部连接配置。
-    /// </summary>
     public async Task<IReadOnlyList<McpConnectionRecord>> GetAllAsync(CancellationToken cancellationToken = default)
     {
         await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-        return await dbContext.McpConnections
+        var entities = await dbContext.McpConnections
             .AsNoTracking()
             .OrderByDescending(x => x.IsDefault)
             .ThenBy(x => x.Name)
-            .Select(ToRecordExpression())
             .ToListAsync(cancellationToken);
+
+        return entities.Select(ToRecord).ToArray();
     }
 
-    /// <summary>
-    /// 按主键读取单条连接配置。
-    /// </summary>
     public async Task<McpConnectionRecord?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
         await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-        return await dbContext.McpConnections
+        var entity = await dbContext.McpConnections
             .AsNoTracking()
-            .Where(x => x.Id == id)
-            .Select(ToRecordExpression())
-            .FirstOrDefaultAsync(cancellationToken);
+            .FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
+
+        return entity is null ? null : ToRecord(entity);
     }
 
-    /// <summary>
-    /// 新增连接配置。
-    /// </summary>
     public async Task AddAsync(McpConnectionRecord record, CancellationToken cancellationToken = default)
     {
         await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
@@ -48,22 +42,19 @@ public sealed class McpConnectionRepository(IDbContextFactory<ControlPlaneDbCont
         await dbContext.SaveChangesAsync(cancellationToken);
     }
 
-    /// <summary>
-    /// 更新连接配置。
-    /// </summary>
     public async Task UpdateAsync(McpConnectionRecord record, CancellationToken cancellationToken = default)
     {
         await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var entity = await dbContext.McpConnections.FirstOrDefaultAsync(x => x.Id == record.Id, cancellationToken)
-            ?? throw new InvalidOperationException($"未找到 MCP 连接：{record.Id}");
+            ?? throw new InvalidOperationException($"MCP connection not found: {record.Id}");
 
         entity.Name = record.Name;
         entity.Engine = record.Engine;
         entity.DisplayName = record.DisplayName;
         entity.ServerCommand = record.ServerCommand;
-        entity.ServerArgumentsJson = record.ServerArgumentsJson;
-        entity.EnvironmentJson = record.EnvironmentJson;
-        entity.DatabaseConnectionString = record.DatabaseConnectionString;
+        entity.ServerArgumentsJson = secretProtector.ProtectIfNeeded(record.ServerArgumentsJson);
+        entity.EnvironmentJson = secretProtector.ProtectIfNeeded(record.EnvironmentJson);
+        entity.DatabaseConnectionString = secretProtector.ProtectIfNeeded(record.DatabaseConnectionString);
         entity.DatabaseName = record.DatabaseName;
         entity.IsDefault = record.IsDefault;
         entity.Status = record.Status;
@@ -73,20 +64,17 @@ public sealed class McpConnectionRepository(IDbContextFactory<ControlPlaneDbCont
         await dbContext.SaveChangesAsync(cancellationToken);
     }
 
-    /// <summary>
-    /// 将持久化实体投影为 Application 轻量记录。
-    /// </summary>
-    private static Expression<Func<McpConnectionEntity, McpConnectionRecord>> ToRecordExpression()
+    private McpConnectionRecord ToRecord(McpConnectionEntity entity)
     {
-        return entity => new McpConnectionRecord(
+        return new McpConnectionRecord(
             entity.Id,
             entity.Name,
             entity.Engine,
             entity.DisplayName,
             entity.ServerCommand,
-            entity.ServerArgumentsJson,
-            entity.EnvironmentJson,
-            entity.DatabaseConnectionString,
+            secretProtector.UnprotectIfNeeded(entity.ServerArgumentsJson),
+            secretProtector.UnprotectIfNeeded(entity.EnvironmentJson),
+            secretProtector.UnprotectIfNeeded(entity.DatabaseConnectionString),
             entity.DatabaseName,
             entity.IsDefault,
             entity.Status,
@@ -95,10 +83,7 @@ public sealed class McpConnectionRepository(IDbContextFactory<ControlPlaneDbCont
             entity.UpdatedAt);
     }
 
-    /// <summary>
-    /// 将 Application 记录转换为持久化实体。
-    /// </summary>
-    private static McpConnectionEntity ToEntity(McpConnectionRecord record)
+    private McpConnectionEntity ToEntity(McpConnectionRecord record)
     {
         return new McpConnectionEntity
         {
@@ -107,9 +92,9 @@ public sealed class McpConnectionRepository(IDbContextFactory<ControlPlaneDbCont
             Engine = record.Engine,
             DisplayName = record.DisplayName,
             ServerCommand = record.ServerCommand,
-            ServerArgumentsJson = record.ServerArgumentsJson,
-            EnvironmentJson = record.EnvironmentJson,
-            DatabaseConnectionString = record.DatabaseConnectionString,
+            ServerArgumentsJson = secretProtector.ProtectIfNeeded(record.ServerArgumentsJson),
+            EnvironmentJson = secretProtector.ProtectIfNeeded(record.EnvironmentJson),
+            DatabaseConnectionString = secretProtector.ProtectIfNeeded(record.DatabaseConnectionString),
             DatabaseName = record.DatabaseName,
             IsDefault = record.IsDefault,
             Status = record.Status,

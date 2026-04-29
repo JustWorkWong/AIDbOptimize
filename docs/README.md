@@ -9,14 +9,20 @@
 - `docs/plans/`
   分阶段计划与执行清单。
 - `docs/plans/active/`
-  正在推进或已经完成但仍保留为设计基线的计划。
+  存放当前计划和历史基线计划。
 
 ## 主题文档
 
 - [MCP 获取 tools 的配置与实现说明](./mcp/README.md)
 - [PostgreSQL MCP 方案对比与推荐](./mcp/postgresql-mcp-options.md)
 
-## 当前活跃计划
+## 当前唯一执行计划
+
+- [数据库配置优化 workflow 总体方案](./plans/active/2026-04-aidboptimize-db-config-workflow/design.md)
+- [数据库配置优化 workflow 详细设计](./plans/active/2026-04-aidboptimize-db-config-workflow/detailed-design.md)
+- [数据库配置优化 workflow 任务拆解](./plans/active/2026-04-aidboptimize-db-config-workflow/tasks.md)
+
+## 历史基线
 
 - [DDD + MCP + 测试数据初始化总体设计](./plans/active/2026-04-aidboptimize-ddd-mcp-seeding/design.md)
 - [DDD + MCP + 测试数据初始化详细设计](./plans/active/2026-04-aidboptimize-ddd-mcp-seeding/detailed-design.md)
