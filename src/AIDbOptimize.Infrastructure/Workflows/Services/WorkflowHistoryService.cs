@@ -134,7 +134,10 @@ public sealed class WorkflowHistoryService(
                 session.Connection.DatabaseName),
             string.IsNullOrWhiteSpace(session.ResultPayloadJson) || session.ResultPayloadJson == "{}"
                 ? null
-                : new WorkflowResultDto(session.ResultType, session.ResultPayloadJson),
+                : new WorkflowResultDto(
+                    session.ResultType,
+                    session.ResultPayloadJson,
+                    WorkflowResultParser.TryParse(session.ResultPayloadJson)),
             summary,
             session.ErrorMessage,
             nodeExecutions,

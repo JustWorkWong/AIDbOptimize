@@ -17,6 +17,7 @@ public sealed class DbConfigGroundingExecutor(
         var root = document.RootElement;
         var evidenceReferences = evidence.EvidenceItems
             .Select(item => item.Reference)
+            .Concat(evidence.MissingContextItems.Select(item => item.Reference))
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         if (!root.TryGetProperty("recommendations", out var recommendations))
@@ -30,6 +31,24 @@ public sealed class DbConfigGroundingExecutor(
             if (string.IsNullOrWhiteSpace(key))
             {
                 throw new InvalidOperationException("recommendation.key 不能为空。");
+            }
+
+            if (item.TryGetProperty("evidenceReferences", out var explicitReferences) &&
+                explicitReferences.ValueKind == JsonValueKind.Array)
+            {
+                var resolved = explicitReferences.EnumerateArray()
+                    .Where(static reference => reference.ValueKind == JsonValueKind.String)
+                    .Select(static reference => reference.GetString())
+                    .Where(static reference => !string.IsNullOrWhiteSpace(reference))
+                    .Cast<string>()
+                    .Any(evidenceReferences.Contains);
+
+                if (!resolved)
+                {
+                    throw new InvalidOperationException($"recommendation `{key}` 缺少可解析的 evidenceReferences。");
+                }
+
+                continue;
             }
 
             if (!evidenceReferences.Contains(key))

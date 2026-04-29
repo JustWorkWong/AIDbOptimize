@@ -29,8 +29,8 @@ public sealed class DbConfigCollectorTests
                 false,
                 DateTimeOffset.UtcNow,
                 DateTimeOffset.UtcNow));
-        var executionService = new FakeExecutionService("""{"max_connections":"300","innodb_buffer_pool_size":"512MB"}""");
-        var collector = new DbConfigSnapshotCollectorExecutor(toolRepository, executionService);
+        var executionService = new FakeExecutionService("""{"max_connections":"300","innodb_buffer_pool_size":"512MB","threads_connected":"12","performance_schema_enabled":"true"}""");
+        var collector = new DbConfigSnapshotCollectorExecutor(toolRepository, executionService, []);
 
         var snapshot = await collector.CollectAsync(new McpConnectionEntity
         {
@@ -43,6 +43,10 @@ public sealed class DbConfigCollectorTests
         Assert.Equal("mcp-tool:query", snapshot.Source);
         Assert.Equal("300", snapshot.CollectedValues["max_connections"]);
         Assert.Empty(snapshot.Warnings);
+        Assert.Contains(snapshot.ConfigurationItems, item => item.Reference == "max_connections");
+        Assert.Contains(snapshot.RuntimeMetricItems, item => item.Reference == "threads_connected");
+        Assert.Contains(snapshot.ObservabilityItems, item => item.Reference == "performance_schema_enabled");
+        Assert.NotEmpty(snapshot.MissingContextItems);
     }
 
     [Fact]
@@ -50,7 +54,7 @@ public sealed class DbConfigCollectorTests
     {
         var toolRepository = new FakeToolRepository();
         var executionService = new FakeExecutionService("{}");
-        var collector = new DbConfigSnapshotCollectorExecutor(toolRepository, executionService);
+        var collector = new DbConfigSnapshotCollectorExecutor(toolRepository, executionService, []);
 
         var snapshot = await collector.CollectAsync(new McpConnectionEntity
         {
@@ -62,6 +66,52 @@ public sealed class DbConfigCollectorTests
 
         Assert.Equal("metadata-fallback", snapshot.Source);
         Assert.NotEmpty(snapshot.Warnings);
+        Assert.NotEmpty(snapshot.MissingContextItems);
+    }
+
+    [Fact]
+    public async Task CollectAsync_ParsesStructuredContentPayload()
+    {
+        var toolRepository = new FakeToolRepository(
+            new McpToolRecord(
+                Guid.NewGuid(),
+                Guid.Parse("22222222-2222-2222-2222-222222222222"),
+                "execute_query",
+                "execute_query",
+                "只读查询",
+                "{}",
+                ToolApprovalMode.NoApproval,
+                true,
+                false,
+                DateTimeOffset.UtcNow,
+                DateTimeOffset.UtcNow));
+        var responseJson = """
+        {
+          "structuredContent": [
+            {
+              "shared_buffers": "256MB",
+              "work_mem": "4MB",
+              "blks_hit": "1000",
+              "pg_stat_statements_enabled": "false"
+            }
+          ]
+        }
+        """;
+        var executionService = new FakeExecutionService(responseJson);
+        var collector = new DbConfigSnapshotCollectorExecutor(toolRepository, executionService, []);
+
+        var snapshot = await collector.CollectAsync(new McpConnectionEntity
+        {
+            Id = Guid.Parse("22222222-2222-2222-2222-222222222222"),
+            Engine = DatabaseEngine.PostgreSql,
+            DisplayName = "postgres-main",
+            DatabaseName = "appdb"
+        });
+
+        Assert.Equal("256MB", snapshot.CollectedValues["shared_buffers"]);
+        Assert.Contains(snapshot.ConfigurationItems, item => item.Reference == "shared_buffers");
+        Assert.Contains(snapshot.RuntimeMetricItems, item => item.Reference == "blks_hit");
+        Assert.Contains(snapshot.ObservabilityItems, item => item.Reference == "pg_stat_statements_enabled");
     }
 
     [Fact]

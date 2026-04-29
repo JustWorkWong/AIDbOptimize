@@ -12,7 +12,15 @@ public static class ToolAllowlistPolicy
         "describe_table",
         "show_indexes",
         "get_config",
-        "explain"
+        "explain",
+        "resolve_runtime_target",
+        "get_container_limits",
+        "get_container_stats",
+        "get_disk_usage",
+        "get_host_memory",
+        "get_host_cpu",
+        "get_process_limits",
+        "get_managed_service_profile"
     };
 
     public static bool IsAllowed(string? toolName, bool isWriteTool)

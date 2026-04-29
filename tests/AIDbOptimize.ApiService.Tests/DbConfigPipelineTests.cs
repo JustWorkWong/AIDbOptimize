@@ -27,18 +27,27 @@ public sealed class DbConfigPipelineTests
             new Dictionary<string, string>
             {
                 ["max_connections"] = "500",
-                ["buffer_pool"] = "256MB"
+                ["innodb_buffer_pool_size"] = "256MB"
             },
             new[]
             {
                 "未发现可直接执行的只读采集工具，当前使用 metadata fallback。"
-            });
+            },
+            missingContextItems:
+            [
+                new DbConfigMissingContextItem(
+                    "memory_limit_bytes",
+                    "实例可用内存上限缺失。",
+                    "metadata fallback")
+            ]);
 
         var evidence = executor.Analyze(snapshot);
 
         Assert.Equal("metadata-fallback", evidence.Source);
         Assert.NotEmpty(evidence.Recommendations);
         Assert.NotEmpty(evidence.EvidenceItems);
+        Assert.NotEmpty(evidence.ConfigurationItems);
+        Assert.NotEmpty(evidence.MissingContextItems);
     }
 
     [Fact]

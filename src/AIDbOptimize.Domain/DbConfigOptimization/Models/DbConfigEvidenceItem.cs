@@ -6,4 +6,12 @@ namespace AIDbOptimize.Domain.DbConfigOptimization.Models;
 public sealed record DbConfigEvidenceItem(
     string SourceType,
     string Reference,
-    string Description);
+    string Description,
+    string Category = "configuration",
+    string? RawValue = null,
+    string? NormalizedValue = null,
+    string? Unit = null,
+    string SourceScope = "db",
+    DateTimeOffset? CapturedAt = null,
+    bool IsCached = false,
+    string? CollectionMethod = null);

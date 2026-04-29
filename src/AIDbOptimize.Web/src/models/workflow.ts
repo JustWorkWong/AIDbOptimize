@@ -31,6 +31,60 @@ export interface WorkflowSummaryReference {
 export interface WorkflowResult {
   resultType: string
   payloadJson: string
+  parsedReport?: WorkflowStructuredResult | null
+}
+
+export interface WorkflowStructuredResult {
+  title: string
+  summary: string
+  recommendations: WorkflowRecommendation[]
+  evidenceItems: WorkflowEvidenceItem[]
+  missingContextItems: WorkflowMissingContextItem[]
+  collectionMetadata: WorkflowCollectionMetadata[]
+  warnings: string[]
+}
+
+export interface WorkflowRecommendation {
+  key: string
+  suggestion: string
+  severity: string
+  findingType: string
+  confidence: string
+  requiresMoreContext: boolean
+  impactSummary: string | null
+  evidenceReferences: string[]
+  recommendationClass: string
+  appliesWhen: string | null
+  ruleId: string | null
+  ruleVersion: string | null
+}
+
+export interface WorkflowEvidenceItem {
+  sourceType: string
+  reference: string
+  description: string
+  category: string
+  rawValue: string | null
+  normalizedValue: string | null
+  unit: string | null
+  sourceScope: string
+  capturedAt: string | null
+  isCached: boolean
+  collectionMethod: string | null
+}
+
+export interface WorkflowMissingContextItem {
+  reference: string
+  description: string
+  reason: string
+  sourceScope: string
+  severity: string
+}
+
+export interface WorkflowCollectionMetadata {
+  name: string
+  value: string
+  description: string | null
 }
 
 export interface WorkflowSessionDetail {

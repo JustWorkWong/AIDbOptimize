@@ -36,4 +36,53 @@ public sealed record WorkflowSummaryReferenceDto(
 
 public sealed record WorkflowResultDto(
     string ResultType,
-    string PayloadJson);
+    string PayloadJson,
+    WorkflowStructuredResultDto? ParsedReport = null);
+
+public sealed record WorkflowStructuredResultDto(
+    string Title,
+    string Summary,
+    IReadOnlyList<WorkflowRecommendationDto> Recommendations,
+    IReadOnlyList<WorkflowEvidenceItemDto> EvidenceItems,
+    IReadOnlyList<WorkflowMissingContextItemDto> MissingContextItems,
+    IReadOnlyList<WorkflowCollectionMetadataDto> CollectionMetadata,
+    IReadOnlyList<string> Warnings);
+
+public sealed record WorkflowRecommendationDto(
+    string Key,
+    string Suggestion,
+    string Severity,
+    string FindingType,
+    string Confidence,
+    bool RequiresMoreContext,
+    string? ImpactSummary,
+    IReadOnlyList<string> EvidenceReferences,
+    string RecommendationClass,
+    string? AppliesWhen,
+    string? RuleId,
+    string? RuleVersion);
+
+public sealed record WorkflowEvidenceItemDto(
+    string SourceType,
+    string Reference,
+    string Description,
+    string Category,
+    string? RawValue,
+    string? NormalizedValue,
+    string? Unit,
+    string SourceScope,
+    DateTimeOffset? CapturedAt,
+    bool IsCached,
+    string? CollectionMethod);
+
+public sealed record WorkflowMissingContextItemDto(
+    string Reference,
+    string Description,
+    string Reason,
+    string SourceScope,
+    string Severity);
+
+public sealed record WorkflowCollectionMetadataDto(
+    string Name,
+    string Value,
+    string? Description);

@@ -377,6 +377,7 @@ public sealed class WorkflowApiTests : IClassFixture<WorkflowApiTests.WorkflowAp
         using var historyDetailJson = JsonDocument.Parse(await historyDetailResponse.Content.ReadAsStringAsync());
         Assert.True(historyDetailJson.RootElement.GetProperty("nodeExecutions").GetArrayLength() >= 1);
         Assert.True(historyDetailJson.RootElement.GetProperty("toolExecutions").GetArrayLength() >= 1);
+        Assert.True(historyDetailJson.RootElement.GetProperty("result").GetProperty("parsedReport").ValueKind == JsonValueKind.Object);
     }
 
     [Fact]
@@ -513,12 +514,43 @@ public sealed class WorkflowApiTests : IClassFixture<WorkflowApiTests.WorkflowAp
                 {
                     key = item.Key,
                     suggestion = item.Suggestion,
-                    severity = item.Severity
+                    severity = item.Severity,
+                    findingType = item.FindingType,
+                    confidence = item.Confidence,
+                    requiresMoreContext = item.RequiresMoreContext,
+                    impactSummary = item.ImpactSummary,
+                    evidenceReferences = item.EvidenceReferences,
+                    recommendationClass = item.RecommendationClass,
+                    appliesWhen = item.AppliesWhen,
+                    ruleId = item.RuleId,
+                    ruleVersion = item.RuleVersion
                 }),
                 evidenceItems = evidence.EvidenceItems.Select(item => new
                 {
                     sourceType = item.SourceType,
                     reference = item.Reference,
+                    description = item.Description,
+                    category = item.Category,
+                    rawValue = item.RawValue,
+                    normalizedValue = item.NormalizedValue,
+                    unit = item.Unit,
+                    sourceScope = item.SourceScope,
+                    capturedAt = item.CapturedAt,
+                    isCached = item.IsCached,
+                    collectionMethod = item.CollectionMethod
+                }),
+                missingContextItems = evidence.MissingContextItems.Select(item => new
+                {
+                    reference = item.Reference,
+                    description = item.Description,
+                    reason = item.Reason,
+                    sourceScope = item.SourceScope,
+                    severity = item.Severity
+                }),
+                collectionMetadata = evidence.CollectionMetadata.Select(item => new
+                {
+                    name = item.Name,
+                    value = item.Value,
                     description = item.Description
                 }),
                 warnings = evidence.Warnings

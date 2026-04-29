@@ -10,6 +10,7 @@ using AIDbOptimize.Infrastructure.Observability;
 using AIDbOptimize.Infrastructure.Persistence;
 using AIDbOptimize.Infrastructure.Persistence.Entities;
 using AIDbOptimize.Infrastructure.Workflows.Pipeline;
+using AIDbOptimize.Infrastructure.Workflows.Services;
 using Microsoft.Agents.AI.Workflows;
 using Microsoft.EntityFrameworkCore;
 
@@ -1773,7 +1774,10 @@ public sealed class ControlPlaneWorkflowRuntime(
             review,
             string.IsNullOrWhiteSpace(session.ResultPayloadJson) || session.ResultPayloadJson == "{}"
                 ? null
-                : new WorkflowResultDto(session.ResultType, session.ResultPayloadJson),
+                : new WorkflowResultDto(
+                    session.ResultType,
+                    session.ResultPayloadJson,
+                    WorkflowResultParser.TryParse(session.ResultPayloadJson)),
             summary,
             session.ErrorMessage,
             $"/api/workflows/{session.Id}/events",

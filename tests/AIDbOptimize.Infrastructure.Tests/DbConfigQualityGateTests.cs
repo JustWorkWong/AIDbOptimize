@@ -54,6 +54,47 @@ public sealed class DbConfigQualityGateTests
     }
 
     [Fact]
+    public void GroundingExecutor_AllowsExplicitEvidenceReferences()
+    {
+        var executor = new DbConfigGroundingExecutor(new RecommendationSchemaValidator());
+        var evidence = new DbConfigEvidencePack(
+            DatabaseEngine.MySql,
+            "orders",
+            "collector",
+            [
+                new DbConfigRecommendation(
+                    "observability-gap",
+                    "Enable better observability.",
+                    "warning",
+                    evidenceReferences: ["slow_query_log"])
+            ],
+            [
+                new DbConfigEvidenceItem("config", "slow_query_log", "Slow query log state.", Category: "observability")
+            ],
+            Array.Empty<string>());
+        var reportJson = """
+        {
+          "title":"db-config report",
+          "summary":"Improve observability.",
+          "recommendations":[
+            {
+              "key":"observability-gap",
+              "suggestion":"Enable better observability.",
+              "severity":"warning",
+              "evidenceReferences":["slow_query_log"]
+            }
+          ],
+          "evidenceItems":[
+            {"sourceType":"config","reference":"slow_query_log","description":"Slow query log state."}
+          ],
+          "warnings":[]
+        }
+        """;
+
+        executor.Validate(evidence, reportJson);
+    }
+
+    [Fact]
     public void ReviewAdjustmentValidator_AllowsKnownAdjustmentKey()
     {
         var validator = new ReviewAdjustmentValidator();
