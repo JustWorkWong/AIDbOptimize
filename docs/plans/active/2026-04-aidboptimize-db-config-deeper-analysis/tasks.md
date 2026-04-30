@@ -41,21 +41,21 @@
 
 ## 阶段 3：规则引擎增强
 
-- [ ] 新增 MySQL engine-specific 规则集
-- [ ] 新增 PostgreSQL engine-specific 规则集
-- [ ] 新增 `observability-gap` 类规则
-- [ ] 新增 MySQL `max_connections / thread / tmp-table / slow-query` 规则
-- [ ] 新增 PostgreSQL `checkpoint / planner-cost / temp-io` 规则
-- [ ] 规则结果补齐 `findingType / confidence / requiresMoreContext / impactSummary / evidenceReferences`
-- [ ] 规则结果补齐 `recommendationClass / appliesWhen / ruleId / ruleVersion`
-- [ ] `DbConfigRuleAnalysisExecutor` 改为规则集合编排
-- [ ] 为关键阈值建立版本化常量或配置，并在 history 中可追踪
+- [x] 新增 MySQL engine-specific 规则集
+- [x] 新增 PostgreSQL engine-specific 规则集
+- [x] 新增 `observability-gap` 类规则
+- [x] 新增 MySQL `max_connections / thread / tmp-table / slow-query` 规则
+- [x] 新增 PostgreSQL `checkpoint / planner-cost / temp-io` 规则
+- [x] 规则结果补齐 `findingType / confidence / requiresMoreContext / impactSummary / evidenceReferences`
+- [x] 规则结果补齐 `recommendationClass / appliesWhen / ruleId / ruleVersion`
+- [x] `DbConfigRuleAnalysisExecutor` 改为规则集合编排
+- [x] 为关键阈值建立版本化常量或配置，并在 history 中可追踪
 
 验收：
-- [ ] 建议输出不再只是“重评估某参数”的泛化文案
-- [ ] 每条建议都能追到 evidence refs
-- [ ] 缺失上下文时能明确降级
-- [ ] history detail 能看到命中的规则版本
+- [x] 建议输出不再只是“重评估某参数”的泛化文案
+- [x] 每条建议都能追到 evidence refs
+- [x] 缺失上下文时能明确降级
+- [x] history detail 能看到命中的规则版本
 
 ## 阶段 4：grounding 与 agent 增强
 

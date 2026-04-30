@@ -84,6 +84,8 @@ public sealed class DbConfigDiagnosisAgentExecutor(
             summary = value.Summary,
             recommendations = value.Recommendations,
             evidenceItems = value.EvidenceItems,
+            missingContextItems = value.MissingContextItems ?? evidence.MissingContextItems,
+            collectionMetadata = value.CollectionMetadata ?? evidence.CollectionMetadata,
             warnings = value.Warnings
         }, SerializerOptions);
 
@@ -136,8 +138,10 @@ Return JSON only.
 The JSON object must contain:
 - title: string
 - summary: string
-- recommendations: array of { key: string, suggestion: string, severity: string }
-- evidenceItems: array of { sourceType: string, reference: string, description: string }
+- recommendations: array of { key: string, suggestion: string, severity: string, findingType: string, confidence: string, requiresMoreContext: boolean, impactSummary: string | null, evidenceReferences: string[], recommendationClass: string, appliesWhen: string | null, ruleId: string | null, ruleVersion: string | null }
+- evidenceItems: array of { sourceType: string, reference: string, description: string, category: string, rawValue: string | null, normalizedValue: string | null, unit: string | null, sourceScope: string, capturedAt: string | null, expiresAt: string | null, isCached: boolean, collectionMethod: string | null }
+- missingContextItems: array of { reference: string, description: string, reason: string, sourceScope: string, severity: string }
+- collectionMetadata: array of { name: string, value: string, description: string | null }
 - warnings: array of strings
 Do not add markdown, explanations, or code fences.
 """
@@ -158,4 +162,6 @@ public sealed record DbConfigDiagnosisAgentResponse(
     string Summary,
     IReadOnlyList<DbConfigRecommendation> Recommendations,
     IReadOnlyList<DbConfigEvidenceItem> EvidenceItems,
+    IReadOnlyList<DbConfigMissingContextItem> MissingContextItems,
+    IReadOnlyList<DbConfigCollectionMetadataItem> CollectionMetadata,
     IReadOnlyList<string> Warnings);

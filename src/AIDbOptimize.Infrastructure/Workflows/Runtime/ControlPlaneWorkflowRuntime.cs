@@ -203,6 +203,7 @@ public sealed class ControlPlaneWorkflowRuntime(
                 .AsNoTracking()
                 .SingleAsync(x => x.Id == session.ConnectionId, cancellationToken);
             MafReviewRequest? reviewPayload = null;
+            var persistedDiagnosis = await TryBuildPersistedDiagnosisArtifactsAsync(dbContext, session, cancellationToken);
             if (graphResult.RequestInfo is not null &&
                 graphResult.RequestInfo.Request.TryGetDataAs<MafReviewRequest>(out var reviewRequestData))
             {
@@ -211,14 +212,18 @@ public sealed class ControlPlaneWorkflowRuntime(
 
             session.ResultPayloadJson = graphResult.Grounded?.ReportJson
                 ?? reviewPayload?.PayloadJson
+                ?? persistedDiagnosis?.ReportJson
                 ?? session.ResultPayloadJson;
             session.AgentSessionId = graphResult.Grounded?.AgentSessionId
                 ?? reviewPayload?.AgentSessionId
+                ?? persistedDiagnosis?.AgentSessionId
                 ?? session.AgentSessionId;
             session.TotalTokens = graphResult.Grounded is not null
                 ? ExtractTokenCount(graphResult.Grounded.TokenUsageJson)
                 : reviewPayload is not null
                     ? ExtractTokenCount(reviewPayload.TokenUsageJson)
+                    : persistedDiagnosis is not null
+                        ? ExtractTokenCount(persistedDiagnosis.TokenUsageJson)
                     : session.TotalTokens;
             session.CurrentNodeKey = graphResult.RequestInfo is null
                 ? "DbConfigGroundingExecutor"
@@ -235,7 +240,9 @@ public sealed class ControlPlaneWorkflowRuntime(
             await dbContext.SaveChangesAsync(cancellationToken);
             nextSequence = await GetNextEventSequenceAsync(dbContext, session.Id, cancellationToken);
 
-            if (graphResult.RequestInfo is not null || graphResult.RunStatus == RunStatus.PendingRequests)
+            if (graphResult.RequestInfo is not null ||
+                graphResult.RunStatus == RunStatus.PendingRequests ||
+                (command.RequireHumanReview && (graphResult.Grounded is not null || persistedDiagnosis is not null)))
             {
                 var reviewTask = await ExecuteReviewGateAsync(
                     dbContext,
@@ -243,11 +250,11 @@ public sealed class ControlPlaneWorkflowRuntime(
                     connection,
                     command,
                     new DiagnosisArtifacts(
-                        reviewPayload?.PayloadJson ?? graphResult.Grounded!.ReportJson,
-                        reviewPayload?.Prompt ?? graphResult.Grounded!.Prompt,
-                        reviewPayload?.AgentSessionId ?? graphResult.Grounded!.AgentSessionId,
-                        reviewPayload?.SummaryId ?? graphResult.Grounded!.SummaryId,
-                        reviewPayload?.TokenUsageJson ?? graphResult.Grounded!.TokenUsageJson),
+                        reviewPayload?.PayloadJson ?? graphResult.Grounded?.ReportJson ?? persistedDiagnosis?.ReportJson ?? session.ResultPayloadJson,
+                        reviewPayload?.Prompt ?? graphResult.Grounded?.Prompt ?? persistedDiagnosis?.Prompt ?? string.Empty,
+                        reviewPayload?.AgentSessionId ?? graphResult.Grounded?.AgentSessionId ?? persistedDiagnosis?.AgentSessionId ?? session.AgentSessionId ?? Guid.Empty,
+                        reviewPayload?.SummaryId ?? graphResult.Grounded?.SummaryId ?? persistedDiagnosis?.SummaryId ?? Guid.Empty,
+                        reviewPayload?.TokenUsageJson ?? graphResult.Grounded?.TokenUsageJson ?? persistedDiagnosis?.TokenUsageJson ?? """{"promptTokens":0,"completionTokens":0,"totalTokens":0}"""),
                     nextSequence,
                     graphResult.RequestInfo,
                     graphResult.LastCheckpointRef,
@@ -259,7 +266,23 @@ public sealed class ControlPlaneWorkflowRuntime(
 
             if (graphResult.Completion is null)
             {
-                throw new InvalidOperationException("MAF graph finished without a completion output.");
+                if (graphResult.Grounded is null && persistedDiagnosis is null)
+                {
+                    throw new InvalidOperationException("MAF graph finished without a completion output.");
+                }
+
+                graphResult = graphResult with
+                {
+                    Completion = new MafCompletionMessage(
+                        graphResult.Grounded?.SessionId ?? session.Id,
+                        graphResult.Grounded?.ReportJson ?? persistedDiagnosis?.ReportJson ?? session.ResultPayloadJson,
+                        false,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null)
+                };
             }
 
             await ExecuteCompletionAsync(
@@ -505,6 +528,30 @@ public sealed class ControlPlaneWorkflowRuntime(
 
         if (graphResult.Completion is null)
         {
+            var pendingReviewTask = await dbContext.WorkflowReviewTasks
+                .Where(x => x.WorkflowSessionId == session.Id && x.Status == WorkflowReviewTaskStatus.Pending)
+                .OrderByDescending(x => x.CreatedAt)
+                .FirstOrDefaultAsync(cancellationToken);
+
+            if (pendingReviewTask is not null)
+            {
+                session.Status = WorkflowSessionStatus.WaitingForReview;
+                session.CurrentNodeKey = "DbConfigHumanReviewGateExecutor";
+                session.ActiveReviewTaskId = pendingReviewTask.Id;
+                session.CompletedAt = null;
+                session.UpdatedAt = DateTimeOffset.UtcNow;
+                UpdateStateJson(session, new
+                {
+                    sessionId = session.Id,
+                    status = PublicStatus(session.Status),
+                    currentNode = session.CurrentNodeKey,
+                    reviewTaskId = pendingReviewTask.Id,
+                    recoveredAt = session.UpdatedAt
+                });
+                await dbContext.SaveChangesAsync(cancellationToken);
+                return await BuildDetailAsync(dbContext, session.Id, cancellationToken);
+            }
+
             throw new InvalidOperationException("MAF recovery finished without a completion or pending request.");
         }
 
@@ -646,6 +693,8 @@ public sealed class ControlPlaneWorkflowRuntime(
             sessionId.ToString(),
             cancellationToken);
 
+        var runStatus = await run.GetStatusAsync(cancellationToken);
+
         var grounded = run.OutgoingEvents
             .OfType<WorkflowOutputEvent>()
             .Select(workflowEvent => workflowEvent.As<MafGroundedMessage>())
@@ -655,8 +704,6 @@ public sealed class ControlPlaneWorkflowRuntime(
             .Select(workflowEvent => workflowEvent.As<MafCompletionMessage>())
             .FirstOrDefault(message => message is not null);
         var requestInfo = run.OutgoingEvents.OfType<RequestInfoEvent>().FirstOrDefault();
-
-        var runStatus = await run.GetStatusAsync(cancellationToken);
 
         return new MafGraphRunResult(
             grounded is null ? null : grounded with { LastCheckpointRef = run.LastCheckpoint?.CheckpointId },
@@ -681,8 +728,29 @@ public sealed class ControlPlaneWorkflowRuntime(
             checkpointManager,
             cancellationToken);
 
-        var pendingRequest = run.OutgoingEvents.OfType<RequestInfoEvent>().FirstOrDefault()
-            ?? throw new InvalidOperationException("No pending review request was re-emitted during resume.");
+        var pendingRequest = run.OutgoingEvents.OfType<RequestInfoEvent>().FirstOrDefault();
+        if (pendingRequest is null)
+        {
+            var runStatusWithoutRequest = await run.GetStatusAsync(cancellationToken);
+            return new MafGraphRunResult(
+                null,
+                new MafCompletionMessage(
+                    sessionId,
+                    string.Empty,
+                    reviewTask.Status == WorkflowReviewTaskStatus.Rejected,
+                    reviewTask.DecisionNote,
+                    reviewTask.Status == WorkflowReviewTaskStatus.Rejected
+                        ? "reject"
+                        : reviewTask.Status == WorkflowReviewTaskStatus.Adjusted
+                            ? "adjust"
+                            : "approve",
+                    reviewTask.DecisionBy,
+                    reviewTask.DecisionNote,
+                    reviewTask.AdjustmentsJson),
+                null,
+                run.LastCheckpoint?.CheckpointId ?? reviewTask.EngineCheckpointRef,
+                runStatusWithoutRequest);
+        }
         var response = pendingRequest.Request.CreateResponse(new MafReviewResponse(
             reviewTask.Status == WorkflowReviewTaskStatus.Rejected ? "reject" : reviewTask.Status == WorkflowReviewTaskStatus.Adjusted ? "adjust" : "approve",
             reviewTask.DecisionBy,
@@ -691,13 +759,13 @@ public sealed class ControlPlaneWorkflowRuntime(
 
         await run.ResumeAsync(new[] { response }, cancellationToken);
 
+        var runStatus = await run.GetStatusAsync(cancellationToken);
+
         var completion = run.OutgoingEvents
             .OfType<WorkflowOutputEvent>()
             .Select(workflowEvent => workflowEvent.As<MafCompletionMessage>())
             .FirstOrDefault(message => message is not null)
             ?? throw new InvalidOperationException("MAF resume finished without a completion output.");
-
-        var runStatus = await run.GetStatusAsync(cancellationToken);
         return new MafGraphRunResult(null, completion, null, run.LastCheckpoint?.CheckpointId, runStatus);
     }
 
@@ -715,13 +783,13 @@ public sealed class ControlPlaneWorkflowRuntime(
             checkpointManager,
             cancellationToken);
 
+        var runStatus = await run.GetStatusAsync(cancellationToken);
+
         var requestInfo = run.OutgoingEvents.OfType<RequestInfoEvent>().FirstOrDefault();
         var completion = run.OutgoingEvents
             .OfType<WorkflowOutputEvent>()
             .Select(workflowEvent => workflowEvent.As<MafCompletionMessage>())
             .FirstOrDefault(message => message is not null);
-
-        var runStatus = await run.GetStatusAsync(cancellationToken);
         return new MafGraphRunResult(null, completion, requestInfo, run.LastCheckpoint?.CheckpointId, runStatus);
     }
 
@@ -1531,6 +1599,42 @@ public sealed class ControlPlaneWorkflowRuntime(
         }, "Tool execution linked to workflow node.", nodeExecutionId, mcpToolExecutionId: latestToolExecution.Id);
 
         return nextSequence;
+    }
+
+    private static async Task<DiagnosisArtifacts?> TryBuildPersistedDiagnosisArtifactsAsync(
+        ControlPlaneDbContext dbContext,
+        WorkflowSessionEntity session,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(session.ResultPayloadJson) || string.Equals(session.ResultPayloadJson, "{}", StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        if (!session.AgentSessionId.HasValue)
+        {
+            return null;
+        }
+
+        var agentSession = await dbContext.AgentSessions
+            .AsNoTracking()
+            .SingleOrDefaultAsync(x => x.Id == session.AgentSessionId.Value, cancellationToken);
+        if (agentSession is null)
+        {
+            return null;
+        }
+
+        return new DiagnosisArtifacts(
+            session.ResultPayloadJson,
+            string.Empty,
+            session.AgentSessionId.Value,
+            agentSession.ActiveSummaryId ?? Guid.Empty,
+            JsonSerializer.Serialize(new
+            {
+                promptTokens = 0,
+                completionTokens = 0,
+                totalTokens = session.TotalTokens
+            }, SerializerOptions));
     }
 
     private async Task<WorkflowCheckpointEntity> CreateCheckpointAsync(

@@ -99,6 +99,17 @@ builder.Services.AddScoped<IAgentSessionPersistenceService, AgentSessionPersiste
 builder.Services.AddScoped<IAgentSummaryService, AgentSummaryService>();
 builder.Services.AddScoped<DbConfigInputValidationExecutor>();
 builder.Services.AddScoped<IDbConfigHostContextCollector, McpDbConfigHostContextCollector>();
+builder.Services.AddScoped<IDbConfigRule, MySqlBufferPoolRule>();
+builder.Services.AddScoped<IDbConfigRule, MySqlConnectionsRule>();
+builder.Services.AddScoped<IDbConfigRule, MySqlThreadingRule>();
+builder.Services.AddScoped<IDbConfigRule, MySqlTempTableRule>();
+builder.Services.AddScoped<IDbConfigRule, MySqlSlowQueryRule>();
+builder.Services.AddScoped<IDbConfigRule, MySqlObservabilityGapRule>();
+builder.Services.AddScoped<IDbConfigRule, PostgreSqlSharedBuffersRule>();
+builder.Services.AddScoped<IDbConfigRule, PostgreSqlCheckpointRule>();
+builder.Services.AddScoped<IDbConfigRule, PostgreSqlPlannerCostRule>();
+builder.Services.AddScoped<IDbConfigRule, PostgreSqlTempIoRule>();
+builder.Services.AddScoped<IDbConfigRule, PostgreSqlObservabilityGapRule>();
 builder.Services.AddScoped<DbConfigSnapshotCollectorExecutor>();
 builder.Services.AddScoped<DbConfigRuleAnalysisExecutor>();
 builder.Services.AddScoped<DbConfigDiagnosisReportBuilder>();

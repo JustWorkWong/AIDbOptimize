@@ -378,6 +378,16 @@ public sealed class WorkflowApiTests : IClassFixture<WorkflowApiTests.WorkflowAp
         Assert.True(historyDetailJson.RootElement.GetProperty("nodeExecutions").GetArrayLength() >= 1);
         Assert.True(historyDetailJson.RootElement.GetProperty("toolExecutions").GetArrayLength() >= 1);
         Assert.True(historyDetailJson.RootElement.GetProperty("result").GetProperty("parsedReport").ValueKind == JsonValueKind.Object);
+        Assert.True(historyDetailJson.RootElement
+            .GetProperty("result")
+            .GetProperty("parsedReport")
+            .GetProperty("recommendations")[0]
+            .TryGetProperty("ruleId", out _));
+        Assert.True(historyDetailJson.RootElement
+            .GetProperty("result")
+            .GetProperty("parsedReport")
+            .GetProperty("recommendations")[0]
+            .TryGetProperty("ruleVersion", out _));
     }
 
     [Fact]

@@ -95,6 +95,38 @@ public sealed class DbConfigQualityGateTests
     }
 
     [Fact]
+    public void RecommendationSchemaValidator_AllowsRicherRecommendationFields()
+    {
+        var validator = new RecommendationSchemaValidator();
+        var json = """
+        {
+          "title":"db-config report",
+          "summary":"rich result",
+          "recommendations":[
+            {
+              "key":"max_connections",
+              "suggestion":"review connection cap",
+              "severity":"medium",
+              "findingType":"concurrency",
+              "confidence":"medium",
+              "requiresMoreContext":false,
+              "impactSummary":"higher memory reserve",
+              "evidenceReferences":["max_connections","threads_connected"],
+              "recommendationClass":"capacity-planning",
+              "appliesWhen":"current concurrency remains low",
+              "ruleId":"mysql.connections.capacity",
+              "ruleVersion":"2026-04-30"
+            }
+          ],
+          "evidenceItems":[],
+          "warnings":[]
+        }
+        """;
+
+        validator.Validate(json);
+    }
+
+    [Fact]
     public void ReviewAdjustmentValidator_AllowsKnownAdjustmentKey()
     {
         var validator = new ReviewAdjustmentValidator();
