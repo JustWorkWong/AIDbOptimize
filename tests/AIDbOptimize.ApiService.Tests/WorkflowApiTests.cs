@@ -77,8 +77,7 @@ public sealed class WorkflowApiTests : IClassFixture<WorkflowApiTests.WorkflowAp
 
         var detailResponse = await client.GetAsync($"/api/workflows/{workflowId}");
         detailResponse.EnsureSuccessStatusCode();
-        using var detailJson = JsonDocument.Parse(await detailResponse.Content.ReadAsStringAsync());
-        Assert.Equal("Completed", detailJson.RootElement.GetProperty("status").GetString());
+        await WaitForWorkflowStatusAsync(client, workflowId!, expectedStatuses: ["Completed"], timeoutSeconds: 60);
     }
 
     [Fact]
@@ -105,12 +104,7 @@ public sealed class WorkflowApiTests : IClassFixture<WorkflowApiTests.WorkflowAp
         var workflowId = startJson.RootElement.GetProperty("sessionId").GetString();
         Assert.False(string.IsNullOrWhiteSpace(workflowId));
 
-        var reviewsResponse = await client.GetAsync("/api/reviews");
-        reviewsResponse.EnsureSuccessStatusCode();
-        using var reviewsJson = JsonDocument.Parse(await reviewsResponse.Content.ReadAsStringAsync());
-        var taskId = reviewsJson.RootElement.EnumerateArray()
-            .First(item => string.Equals(item.GetProperty("sessionId").GetString(), workflowId, StringComparison.OrdinalIgnoreCase))
-            .GetProperty("taskId").GetString();
+        var taskId = await WaitForReviewTaskAsync(client, workflowId!, 60);
 
         Assert.False(string.IsNullOrWhiteSpace(taskId));
 
@@ -123,10 +117,7 @@ public sealed class WorkflowApiTests : IClassFixture<WorkflowApiTests.WorkflowAp
 
         submitResponse.EnsureSuccessStatusCode();
 
-        var workflowResponse = await client.GetAsync($"/api/workflows/{workflowId}");
-        workflowResponse.EnsureSuccessStatusCode();
-        using var workflowJson = JsonDocument.Parse(await workflowResponse.Content.ReadAsStringAsync());
-        Assert.Equal("Completed", workflowJson.RootElement.GetProperty("status").GetString());
+        await WaitForWorkflowStatusAsync(client, workflowId!, expectedStatuses: ["Completed"], timeoutSeconds: 60);
     }
 
     [Fact]
@@ -188,17 +179,13 @@ public sealed class WorkflowApiTests : IClassFixture<WorkflowApiTests.WorkflowAp
         var workflowId = startJson.RootElement.GetProperty("sessionId").GetString();
         Assert.True(Guid.TryParse(workflowId, out var sessionId));
 
+        var taskId = await WaitForReviewTaskAsync(client, workflowId!, 60);
+
         await using (var dbContext = _factory.CreateControlPlaneDbContext())
         {
             var checkpointCount = dbContext.WorkflowCheckpoints.Count(x => x.WorkflowSessionId == sessionId);
             Assert.True(checkpointCount >= 1);
         }
-
-        var reviewsResponse = await client.GetAsync("/api/reviews");
-        using var reviewsJson = JsonDocument.Parse(await reviewsResponse.Content.ReadAsStringAsync());
-        var taskId = reviewsJson.RootElement.EnumerateArray()
-            .First(item => string.Equals(item.GetProperty("sessionId").GetString(), workflowId, StringComparison.OrdinalIgnoreCase))
-            .GetProperty("taskId").GetString();
 
         int checkpointCountBeforeSubmit;
         await using (var dbContextBefore = _factory.CreateControlPlaneDbContext())
@@ -244,6 +231,8 @@ public sealed class WorkflowApiTests : IClassFixture<WorkflowApiTests.WorkflowAp
         var workflowId = startJson.RootElement.GetProperty("sessionId").GetString();
         Assert.True(Guid.TryParse(workflowId, out var sessionId));
 
+        await WaitForWorkflowStatusAsync(client, workflowId!, expectedStatuses: ["Completed"], timeoutSeconds: 60);
+
         await using var dbContext = _factory.CreateControlPlaneDbContext();
         var session = dbContext.WorkflowSessions.Single(x => x.Id == sessionId);
         Assert.NotNull(session.AgentSessionId);
@@ -280,11 +269,10 @@ public sealed class WorkflowApiTests : IClassFixture<WorkflowApiTests.WorkflowAp
 
         startResponse.EnsureSuccessStatusCode();
         using var startJson = JsonDocument.Parse(await startResponse.Content.ReadAsStringAsync());
-        var status = startJson.RootElement.GetProperty("status").GetString();
         var workflowId = startJson.RootElement.GetProperty("sessionId").GetString();
 
-        Assert.Equal("Completed", status);
         Assert.False(string.IsNullOrWhiteSpace(workflowId));
+        await WaitForWorkflowStatusAsync(client, workflowId!, expectedStatuses: ["Completed"], timeoutSeconds: 60);
 
         var reviewsResponse = await client.GetAsync("/api/reviews");
         using var reviewsJson = JsonDocument.Parse(await reviewsResponse.Content.ReadAsStringAsync());
@@ -317,11 +305,7 @@ public sealed class WorkflowApiTests : IClassFixture<WorkflowApiTests.WorkflowAp
         using var startJson = JsonDocument.Parse(await startResponse.Content.ReadAsStringAsync());
         var workflowId = startJson.RootElement.GetProperty("sessionId").GetString();
 
-        var reviewsResponse = await client.GetAsync("/api/reviews");
-        using var reviewsJson = JsonDocument.Parse(await reviewsResponse.Content.ReadAsStringAsync());
-        var taskId = reviewsJson.RootElement.EnumerateArray()
-            .First(item => string.Equals(item.GetProperty("sessionId").GetString(), workflowId, StringComparison.OrdinalIgnoreCase))
-            .GetProperty("taskId").GetString();
+        var taskId = await WaitForReviewTaskAsync(client, workflowId!, 60);
 
         var submitResponse = await client.PostAsJsonAsync($"/api/reviews/{taskId}/submit", new
         {
@@ -338,6 +322,8 @@ public sealed class WorkflowApiTests : IClassFixture<WorkflowApiTests.WorkflowAp
         });
 
         submitResponse.EnsureSuccessStatusCode();
+
+        await WaitForWorkflowStatusAsync(client, workflowId!, expectedStatuses: ["Completed"], timeoutSeconds: 60);
 
         var workflowResponse = await client.GetAsync($"/api/workflows/{workflowId}");
         using var workflowJson = JsonDocument.Parse(await workflowResponse.Content.ReadAsStringAsync());
@@ -371,6 +357,8 @@ public sealed class WorkflowApiTests : IClassFixture<WorkflowApiTests.WorkflowAp
         startResponse.EnsureSuccessStatusCode();
         using var startJson = JsonDocument.Parse(await startResponse.Content.ReadAsStringAsync());
         var workflowId = startJson.RootElement.GetProperty("sessionId").GetString();
+
+        await WaitForWorkflowStatusAsync(client, workflowId!, expectedStatuses: ["Completed"], timeoutSeconds: 60);
 
         var historyDetailResponse = await client.GetAsync($"/api/history/{workflowId}");
         historyDetailResponse.EnsureSuccessStatusCode();
@@ -413,6 +401,9 @@ public sealed class WorkflowApiTests : IClassFixture<WorkflowApiTests.WorkflowAp
         using var startJson = JsonDocument.Parse(await startResponse.Content.ReadAsStringAsync());
         var workflowId = startJson.RootElement.GetProperty("sessionId").GetString();
         Assert.True(Guid.TryParse(workflowId, out var sessionId));
+
+        await WaitForReviewTaskAsync(client, workflowId!, 60);
+        await WaitForWorkflowStatusAsync(client, workflowId!, expectedStatuses: ["WaitingForReview"], timeoutSeconds: 60);
 
         await using (var dbContext = _factory.CreateControlPlaneDbContext())
         {
@@ -656,6 +647,33 @@ public sealed class WorkflowApiTests : IClassFixture<WorkflowApiTests.WorkflowAp
         {
             return Task.FromResult(CreateDbContext());
         }
+    }
+
+    private static async Task<string> WaitForReviewTaskAsync(
+        HttpClient client,
+        string workflowId,
+        int timeoutSeconds)
+    {
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(timeoutSeconds);
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            var response = await client.GetAsync("/api/reviews");
+            response.EnsureSuccessStatusCode();
+            using var payload = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            var match = payload.RootElement
+                .EnumerateArray()
+                .FirstOrDefault(item => string.Equals(item.GetProperty("sessionId").GetString(), workflowId, StringComparison.OrdinalIgnoreCase));
+            if (match.ValueKind == JsonValueKind.Object &&
+                match.TryGetProperty("taskId", out var taskIdElement) &&
+                !string.IsNullOrWhiteSpace(taskIdElement.GetString()))
+            {
+                return taskIdElement.GetString()!;
+            }
+
+            await Task.Delay(500);
+        }
+
+        throw new TimeoutException($"Workflow {workflowId} did not create a review task in time.");
     }
 
     private static async Task WaitForWorkflowStatusAsync(

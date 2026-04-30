@@ -24,40 +24,40 @@ function parsedReviewReport(review: ReviewTaskDetail | null) {
 
 <template>
   <article class="panel">
-    <h2>Review</h2>
+    <h2>审核</h2>
     <p class="section-copy">
-      Review the generated result and resume the workflow with approve, reject, or adjust.
+      审核生成结果，并通过批准、拒绝或调整来恢复工作流。
     </p>
 
     <p v-if="!session" class="state-text">
-      Select a workflow session first.
+      请先选择一个工作流会话。
     </p>
     <p v-else-if="loading" class="state-text">
-      Loading review task...
+      正在加载审核任务……
     </p>
     <p v-else-if="!review" class="state-text">
-      No active review task for the selected session.
+      当前选中的工作流没有待处理审核任务。
     </p>
 
     <template v-if="session && review">
       <div class="review-summary-card">
         <strong>{{ review.title }}</strong>
-        <span>Status: {{ review.status }}</span>
-        <span>Session: {{ session.sessionId }}</span>
+        <span>状态：{{ review.status }}</span>
+        <span>会话：{{ session.sessionId }}</span>
       </div>
 
       <div v-if="parsedReviewReport(review)" class="structured-report">
         <div class="review-detail-grid">
           <div class="tip-card">
-            <strong>Recommendations</strong>
+            <strong>建议数</strong>
             <span>{{ parsedReviewReport(review)?.recommendations.length }}</span>
           </div>
           <div class="tip-card">
-            <strong>Missing Context</strong>
+            <strong>缺失上下文</strong>
             <span>{{ parsedReviewReport(review)?.missingContextItems.length }}</span>
           </div>
           <div class="tip-card">
-            <strong>Warnings</strong>
+            <strong>警告</strong>
             <span>{{ parsedReviewReport(review)?.warnings.length }}</span>
           </div>
         </div>
@@ -78,9 +78,9 @@ function parsedReviewReport(review: ReviewTaskDetail | null) {
               <span class="meta-chip">class: {{ item.recommendationClass }}</span>
               <span class="meta-chip">rule: {{ item.ruleId || 'n/a' }}@{{ item.ruleVersion || 'n/a' }}</span>
             </div>
-            <p v-if="item.appliesWhen" class="structured-note">Applies when: {{ item.appliesWhen }}</p>
+            <p v-if="item.appliesWhen" class="structured-note">适用前提：{{ item.appliesWhen }}</p>
             <p v-if="item.evidenceReferences.length" class="structured-note">
-              Evidence refs: {{ item.evidenceReferences.join(', ') }}
+              证据引用：{{ item.evidenceReferences.join(', ') }}
             </p>
           </article>
         </div>
@@ -95,21 +95,21 @@ function parsedReviewReport(review: ReviewTaskDetail | null) {
         class="review-action-box"
       >
         <label class="form-field">
-          <span>Reviewer</span>
+          <span>审核人</span>
           <input v-model.trim="reviewer" class="text-input" type="text" placeholder="frontend-reviewer">
         </label>
 
         <label class="form-field">
-          <span>Comment</span>
+          <span>审核说明</span>
           <textarea
             v-model.trim="comment"
             class="json-editor"
-            placeholder="Explain the decision or describe the adjustment"
+            placeholder="填写审核结论或调整说明"
           />
         </label>
 
         <label class="form-field">
-          <span>Adjustments JSON</span>
+          <span>调整 JSON</span>
           <textarea
             v-model.trim="adjustmentsJson"
             class="json-editor"
@@ -123,7 +123,7 @@ function parsedReviewReport(review: ReviewTaskDetail | null) {
             :disabled="submitting || !reviewer"
             @click="emit('submit', 'approve')"
           >
-            {{ submitting ? 'Submitting...' : 'Approve' }}
+            {{ submitting ? '提交中…' : '批准' }}
           </button>
           <button
             type="button"
@@ -131,7 +131,7 @@ function parsedReviewReport(review: ReviewTaskDetail | null) {
             :disabled="submitting || !reviewer"
             @click="emit('submit', 'reject')"
           >
-            Reject
+            拒绝
           </button>
           <button
             type="button"
@@ -139,7 +139,7 @@ function parsedReviewReport(review: ReviewTaskDetail | null) {
             :disabled="submitting || !reviewer || !comment"
             @click="emit('submit', 'adjust')"
           >
-            Adjust
+            调整
           </button>
         </div>
       </div>

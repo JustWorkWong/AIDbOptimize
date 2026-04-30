@@ -23,9 +23,9 @@ const canSubmit = computed(() => {
   <article class="panel">
     <div class="panel-header">
       <div>
-        <h2>Launch</h2>
+        <h2>启动</h2>
         <p class="section-copy">
-          Select an existing MCP connection and start a db-config optimization workflow.
+          选择一个现有 MCP 连接并启动数据库配置优化工作流。
         </p>
       </div>
       <button
@@ -33,15 +33,15 @@ const canSubmit = computed(() => {
         :disabled="submitting || !canSubmit"
         @click="emit('submit')"
       >
-        {{ submitting ? 'Submitting...' : 'Start workflow' }}
+        {{ submitting ? '启动中…' : '启动工作流' }}
       </button>
     </div>
 
     <div class="form-grid">
       <label class="form-field">
-        <span>Target connection</span>
+        <span>目标连接</span>
         <select v-model="form.connectionId" class="inline-select">
-          <option value="">Select a connection</option>
+          <option value="">请选择连接</option>
           <option
             v-for="connection in connections"
             :key="connection.id"
@@ -53,7 +53,7 @@ const canSubmit = computed(() => {
       </label>
 
       <label class="form-field">
-        <span>Requested by</span>
+        <span>发起人</span>
         <input
           v-model.trim="form.requestedBy"
           class="text-input"
@@ -63,35 +63,35 @@ const canSubmit = computed(() => {
       </label>
 
       <label class="form-field form-field-wide">
-        <span>Notes</span>
+        <span>备注</span>
         <textarea
           v-model.trim="form.notes"
           class="json-editor"
-          placeholder="Context, goals, constraints, or known risks"
+          placeholder="填写上下文、目标、限制条件或已知风险"
         />
       </label>
     </div>
 
     <div class="tips-grid">
       <label class="tip-card">
-        <strong>Allow fallback snapshot</strong>
+        <strong>允许降级快照</strong>
         <span>
           <input v-model="form.options.allowFallbackSnapshot" type="checkbox">
-          Use metadata fallback when no read-only tool is available.
+          当没有可用只读工具时，允许回退到 metadata 快照。
         </span>
       </label>
       <label class="tip-card">
-        <strong>Require human review</strong>
+        <strong>需要人工审核</strong>
         <span>
           <input v-model="form.options.requireHumanReview" type="checkbox">
-          Pause the workflow and require manual approval before completion.
+          在完成前暂停工作流，并要求人工批准。
         </span>
       </label>
       <label class="tip-card">
-        <strong>Enable grounding</strong>
+        <strong>启用 grounding 校验</strong>
         <span>
           <input v-model="form.options.enableEvidenceGrounding" type="checkbox">
-          Validate that each recommendation is backed by evidence.
+          校验每条建议都有证据支撑。
         </span>
       </label>
     </div>

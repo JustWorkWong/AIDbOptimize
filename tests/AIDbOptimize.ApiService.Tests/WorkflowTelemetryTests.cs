@@ -94,12 +94,7 @@ public sealed class WorkflowTelemetryTests : IClassFixture<WorkflowApiTests.Work
         var workflowId = startJson.RootElement.GetProperty("sessionId").GetString();
         Assert.False(string.IsNullOrWhiteSpace(workflowId));
 
-        var reviewsResponse = await client.GetAsync("/api/reviews");
-        reviewsResponse.EnsureSuccessStatusCode();
-        using var reviewsJson = JsonDocument.Parse(await reviewsResponse.Content.ReadAsStringAsync());
-        var taskId = reviewsJson.RootElement.EnumerateArray()
-            .First(item => string.Equals(item.GetProperty("sessionId").GetString(), workflowId, StringComparison.OrdinalIgnoreCase))
-            .GetProperty("taskId").GetString();
+        var taskId = await WaitForReviewTaskAsync(client, workflowId!, 60);
 
         var submitResponse = await client.PostAsJsonAsync($"/api/reviews/{taskId}/submit", new
         {
@@ -119,5 +114,29 @@ public sealed class WorkflowTelemetryTests : IClassFixture<WorkflowApiTests.Work
         Assert.True(workflowResumed >= 1);
         Assert.True(reviewSubmitted >= 1);
         Assert.True(reviewResumeDuration > 0);
+    }
+
+    private static async Task<string> WaitForReviewTaskAsync(HttpClient client, string workflowId, int timeoutSeconds)
+    {
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(timeoutSeconds);
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            var response = await client.GetAsync("/api/reviews");
+            response.EnsureSuccessStatusCode();
+            using var payload = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            var match = payload.RootElement
+                .EnumerateArray()
+                .FirstOrDefault(item => string.Equals(item.GetProperty("sessionId").GetString(), workflowId, StringComparison.OrdinalIgnoreCase));
+            if (match.ValueKind == JsonValueKind.Object &&
+                match.TryGetProperty("taskId", out var taskIdElement) &&
+                !string.IsNullOrWhiteSpace(taskIdElement.GetString()))
+            {
+                return taskIdElement.GetString()!;
+            }
+
+            await Task.Delay(500);
+        }
+
+        throw new TimeoutException($"Workflow {workflowId} did not create a review task in time.");
     }
 }

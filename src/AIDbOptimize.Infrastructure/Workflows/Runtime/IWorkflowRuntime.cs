@@ -7,7 +7,16 @@ namespace AIDbOptimize.Infrastructure.Workflows.Runtime;
 /// </summary>
 public interface IWorkflowRuntime
 {
+    Task<WorkflowSessionDetailDto> QueueStartDbConfigAsync(
+        DbConfigWorkflowCommand command,
+        CancellationToken cancellationToken = default);
+
     Task<WorkflowSessionDetailDto> StartDbConfigAsync(
+        DbConfigWorkflowCommand command,
+        CancellationToken cancellationToken = default);
+
+    Task ContinueStartAsync(
+        Guid sessionId,
         DbConfigWorkflowCommand command,
         CancellationToken cancellationToken = default);
 

@@ -35,6 +35,23 @@ public sealed class ControlPlaneWorkflowRuntime(
 {
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
 
+    public async Task<WorkflowSessionDetailDto> QueueStartDbConfigAsync(
+        DbConfigWorkflowCommand command,
+        CancellationToken cancellationToken = default)
+    {
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var connection = await dbContext.McpConnections
+            .AsNoTracking()
+            .SingleOrDefaultAsync(x => x.Id == command.ConnectionId, cancellationToken)
+            ?? throw new InvalidOperationException($"未找到连接：{command.ConnectionId}");
+
+        var session = CreateStartSession(command, connection.Id);
+        dbContext.WorkflowSessions.Add(session);
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return await BuildDetailAsync(dbContext, session.Id, cancellationToken);
+    }
+
     public Task<WorkflowSessionDetailDto> StartDbConfigAsync(
         DbConfigWorkflowCommand command,
         CancellationToken cancellationToken = default)
@@ -42,6 +59,31 @@ public sealed class ControlPlaneWorkflowRuntime(
         return RunInternalAsync(
             new WorkflowRunDescriptor(WorkflowRunMode.Start, null, command, null),
             cancellationToken);
+    }
+
+    public async Task ContinueStartAsync(
+        Guid sessionId,
+        DbConfigWorkflowCommand command,
+        CancellationToken cancellationToken = default)
+    {
+        using var activity = AIDbOptimizeTelemetry.WorkflowActivitySource.StartActivity("workflow.start");
+        activity?.SetTag("workflow.session_id", sessionId);
+        var stopwatch = Stopwatch.StartNew();
+        AIDbOptimizeTelemetry.WorkflowStarted.Add(1);
+
+        try
+        {
+            await ExecuteStartSessionAsync(sessionId, command, activity, cancellationToken);
+            stopwatch.Stop();
+            AIDbOptimizeTelemetry.WorkflowDurationMs.Record(stopwatch.Elapsed.TotalMilliseconds);
+        }
+        catch
+        {
+            stopwatch.Stop();
+            AIDbOptimizeTelemetry.WorkflowDurationMs.Record(stopwatch.Elapsed.TotalMilliseconds);
+            AIDbOptimizeTelemetry.WorkflowFailed.Add(1);
+            throw;
+        }
     }
 
     public Task<WorkflowSessionDetailDto> ResumeAsync(
@@ -64,7 +106,7 @@ public sealed class ControlPlaneWorkflowRuntime(
         await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var session = await dbContext.WorkflowSessions
             .SingleOrDefaultAsync(x => x.Id == sessionId, cancellationToken)
-            ?? throw new InvalidOperationException($"Workflow session not found: {sessionId}");
+            ?? throw new InvalidOperationException($"未找到工作流会话：{sessionId}");
 
         session.Status = WorkflowSessionStatus.Cancelled;
         session.CurrentNodeKey = "Cancelled";
@@ -127,7 +169,7 @@ public sealed class ControlPlaneWorkflowRuntime(
                 WorkflowRunMode.Start => await RunStartAsync(descriptor.Command!, activity, cancellationToken),
                 WorkflowRunMode.Resume => await RunResumeAsync(descriptor.SessionId!.Value, descriptor.ResumeRequest!, activity, cancellationToken),
                 WorkflowRunMode.Recovery => await RunRecoveryAsync(descriptor.SessionId!.Value, descriptor.ResumeRequest!, activity, cancellationToken),
-                _ => throw new InvalidOperationException($"Unsupported workflow mode: {descriptor.Mode}")
+                _ => throw new InvalidOperationException($"不支持的工作流运行模式：{descriptor.Mode}")
             };
 
             stopwatch.Stop();
@@ -152,13 +194,26 @@ public sealed class ControlPlaneWorkflowRuntime(
         var connection = await dbContext.McpConnections
             .AsNoTracking()
             .SingleOrDefaultAsync(x => x.Id == command.ConnectionId, cancellationToken)
-            ?? throw new InvalidOperationException($"Connection not found: {command.ConnectionId}");
+            ?? throw new InvalidOperationException($"未找到连接：{command.ConnectionId}");
 
+        var session = CreateStartSession(command, connection.Id);
+        dbContext.WorkflowSessions.Add(session);
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        await ExecuteStartSessionAsync(session.Id, command, activity, cancellationToken);
+        dbContext.ChangeTracker.Clear();
+        return await BuildDetailAsync(dbContext, session.Id, cancellationToken);
+    }
+
+    private WorkflowSessionEntity CreateStartSession(
+        DbConfigWorkflowCommand command,
+        Guid connectionId)
+    {
         var now = DateTimeOffset.UtcNow;
         var session = new WorkflowSessionEntity
         {
             Id = Guid.NewGuid(),
-            ConnectionId = command.ConnectionId,
+            ConnectionId = connectionId,
             WorkflowName = "DbConfigOptimization",
             EngineType = "maf",
             Status = WorkflowSessionStatus.Running,
@@ -172,6 +227,7 @@ public sealed class ControlPlaneWorkflowRuntime(
             CreatedAt = now,
             UpdatedAt = now
         };
+
         UpdateStateJson(session, new
         {
             sessionId = session.Id,
@@ -180,18 +236,35 @@ public sealed class ControlPlaneWorkflowRuntime(
             connectionId = session.ConnectionId
         });
 
-        dbContext.WorkflowSessions.Add(session);
-        await dbContext.SaveChangesAsync(cancellationToken);
+        return session;
+    }
 
-        var nextSequence = 0L;
-        AppendEvent(
-            dbContext,
-            session.Id,
-            ref nextSequence,
-            WorkflowEventType.WorkflowStarted,
-            "workflow.started",
-            new { sessionId = session.Id, runId = session.EngineRunId },
-            "Workflow started.");
+    private async Task ExecuteStartSessionAsync(
+        Guid sessionId,
+        DbConfigWorkflowCommand command,
+        Activity? activity,
+        CancellationToken cancellationToken)
+    {
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var session = await dbContext.WorkflowSessions
+            .SingleAsync(x => x.Id == sessionId, cancellationToken);
+        var connection = await dbContext.McpConnections
+            .AsNoTracking()
+            .SingleAsync(x => x.Id == session.ConnectionId, cancellationToken);
+
+        var nextSequence = await GetNextEventSequenceAsync(dbContext, session.Id, cancellationToken);
+        if (nextSequence == 0)
+        {
+            AppendEvent(
+                dbContext,
+                session.Id,
+                ref nextSequence,
+                WorkflowEventType.WorkflowStarted,
+                "workflow.started",
+                new { sessionId = session.Id, runId = session.EngineRunId },
+                "工作流已启动。");
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
 
         try
         {
@@ -224,7 +297,7 @@ public sealed class ControlPlaneWorkflowRuntime(
                     ? ExtractTokenCount(reviewPayload.TokenUsageJson)
                     : persistedDiagnosis is not null
                         ? ExtractTokenCount(persistedDiagnosis.TokenUsageJson)
-                    : session.TotalTokens;
+                        : session.TotalTokens;
             session.CurrentNodeKey = graphResult.RequestInfo is null
                 ? "DbConfigGroundingExecutor"
                 : "DbConfigHumanReviewGateExecutor";
@@ -244,7 +317,7 @@ public sealed class ControlPlaneWorkflowRuntime(
                 graphResult.RunStatus == RunStatus.PendingRequests ||
                 (command.RequireHumanReview && (graphResult.Grounded is not null || persistedDiagnosis is not null)))
             {
-                var reviewTask = await ExecuteReviewGateAsync(
+                await ExecuteReviewGateAsync(
                     dbContext,
                     session,
                     connection,
@@ -261,7 +334,7 @@ public sealed class ControlPlaneWorkflowRuntime(
                     cancellationToken);
 
                 await dbContext.SaveChangesAsync(cancellationToken);
-                return await BuildDetailAsync(dbContext, session.Id, cancellationToken);
+                return;
             }
 
             if (graphResult.Completion is null)
@@ -290,15 +363,14 @@ public sealed class ControlPlaneWorkflowRuntime(
                 session,
                 graphResult.Completion.ResultPayloadJson,
                 nextSequence,
-                "Workflow completed without human review.",
+                "工作流已完成。",
                 cancellationToken);
 
             await dbContext.SaveChangesAsync(cancellationToken);
-            return await BuildDetailAsync(dbContext, session.Id, cancellationToken);
         }
         catch (Exception ex)
         {
-            var sequence = await GetNextEventSequenceAsync(dbContext, session.Id, cancellationToken);
+            nextSequence = await GetNextEventSequenceAsync(dbContext, session.Id, cancellationToken);
             session.Status = WorkflowSessionStatus.Failed;
             session.CurrentNodeKey ??= "DbConfigCompletionExecutor";
             session.ErrorMessage = ex.Message;
@@ -314,12 +386,12 @@ public sealed class ControlPlaneWorkflowRuntime(
             AppendEvent(
                 dbContext,
                 session.Id,
-                ref sequence,
+                ref nextSequence,
                 WorkflowEventType.WorkflowFailed,
                 "workflow.failed",
                 new { sessionId = session.Id, error = ex.Message },
-                "Workflow failed.");
-            dbContext.WorkflowCheckpoints.Add(await CreateCheckpointAsync(dbContext, session, sequence, cancellationToken));
+                "工作流执行失败。");
+            dbContext.WorkflowCheckpoints.Add(await CreateCheckpointAsync(dbContext, session, nextSequence, cancellationToken));
             await dbContext.SaveChangesAsync(cancellationToken);
             throw;
         }
@@ -339,15 +411,15 @@ public sealed class ControlPlaneWorkflowRuntime(
 
         var reviewTaskId = request.ReviewTaskId is not null && Guid.TryParse(request.ReviewTaskId, out var parsedTaskId)
             ? parsedTaskId
-            : session.ActiveReviewTaskId ?? throw new InvalidOperationException("No active review task was found for this workflow.");
+            : session.ActiveReviewTaskId ?? throw new InvalidOperationException("当前工作流没有可恢复的审核任务。");
 
         var reviewTask = await dbContext.WorkflowReviewTasks
             .SingleOrDefaultAsync(x => x.Id == reviewTaskId, cancellationToken)
-            ?? throw new InvalidOperationException($"Workflow review task not found: {reviewTaskId}");
+            ?? throw new InvalidOperationException($"未找到工作流审核任务：{reviewTaskId}");
 
         if (reviewTask.Status == WorkflowReviewTaskStatus.Pending)
         {
-            throw new InvalidOperationException("The review task is still pending.");
+            throw new InvalidOperationException("审核任务仍处于待处理状态，暂时不能恢复。");
         }
 
         if (!string.Equals(reviewTask.EngineRunId, session.EngineRunId, StringComparison.Ordinal))

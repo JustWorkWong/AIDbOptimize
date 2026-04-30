@@ -86,7 +86,7 @@ async function loadSessions(): Promise<void> {
       selectedSessionId.value = sessions.value[0].sessionId
     }
   } catch (error) {
-    message.value = error instanceof Error ? error.message : 'Failed to load workflows.'
+    message.value = error instanceof Error ? error.message : '加载工作流列表失败。'
   } finally {
     listLoading.value = false
   }
@@ -105,7 +105,7 @@ async function refreshSelectedSession(sessionId: string): Promise<void> {
       ? await getReviewTask(session.review.taskId)
       : null
   } catch (error) {
-    message.value = error instanceof Error ? error.message : 'Failed to load workflow detail.'
+    message.value = error instanceof Error ? error.message : '加载工作流详情失败。'
   } finally {
     detailLoading.value = false
   }
@@ -147,17 +147,17 @@ function closeEventSource(): void {
 
 async function handleWorkflowSubmit(): Promise<void> {
   submitting.value = true
-  message.value = ''
+  message.value = '正在启动工作流，请稍候……'
 
   try {
     const result = await startDbConfigWorkflow(workflowForm.value)
-    message.value = `Workflow started: ${result.sessionId}`
+    message.value = `工作流已启动：${result.sessionId}`
     workflowForm.value = emptyWorkflowRequest()
     workflowForm.value.connectionId = connections.value[0]?.id ?? ''
     selectedSessionId.value = result.sessionId
     await loadSessions()
   } catch (error) {
-    message.value = error instanceof Error ? error.message : 'Failed to start workflow.'
+    message.value = error instanceof Error ? error.message : '启动工作流失败。'
   } finally {
     submitting.value = false
   }
@@ -169,12 +169,12 @@ function handleSessionSelect(sessionId: string): void {
 
 async function handleReviewSubmit(action: 'approve' | 'reject' | 'adjust'): Promise<void> {
   if (!selectedReview.value?.taskId) {
-    message.value = 'No active review task.'
+    message.value = '当前没有可提交的审核任务。'
     return
   }
 
   reviewSubmitting.value = true
-  message.value = ''
+  message.value = '正在提交审核结果，请稍候……'
 
   try {
     const payload = {
@@ -187,14 +187,14 @@ async function handleReviewSubmit(action: 'approve' | 'reject' | 'adjust'): Prom
     }
 
     const result = await submitWorkflowReview(selectedReview.value.taskId, payload)
-    message.value = `Review submitted: ${result.reviewStatus} -> ${result.workflowStatus}`
+    message.value = `审核已提交：${result.reviewStatus} -> ${result.workflowStatus}`
     comment.value = ''
     await loadSessions()
     if (selectedSessionId.value) {
       await refreshSelectedSession(selectedSessionId.value)
     }
   } catch (error) {
-    message.value = error instanceof Error ? error.message : 'Failed to submit review.'
+    message.value = error instanceof Error ? error.message : '提交审核失败。'
   } finally {
     reviewSubmitting.value = false
   }

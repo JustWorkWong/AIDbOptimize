@@ -18,20 +18,20 @@ const emit = defineEmits<{
   <article class="panel">
     <div class="panel-header">
       <div>
-        <h2>History</h2>
+        <h2>历史</h2>
         <p class="section-copy">
-          Browse workflow sessions and switch the active workspace context.
+          浏览工作流会话并切换当前工作区上下文。
         </p>
       </div>
       <button type="button" class="secondary" @click="emit('refresh')">
-        Refresh
+        刷新
       </button>
     </div>
 
-    <p v-if="loading" class="state-text">Loading workflow sessions...</p>
+    <p v-if="loading" class="state-text">正在加载工作流会话……</p>
     <p v-else-if="message" class="state-text">{{ message }}</p>
     <p v-if="!loading && !items.length" class="state-text">
-      No workflow sessions yet.
+      当前还没有工作流会话。
     </p>
 
     <div v-if="items.length" class="workflow-list">
@@ -44,7 +44,7 @@ const emit = defineEmits<{
         @click="emit('select', item.sessionId)"
       >
         <strong>{{ item.connection.displayName }}</strong>
-        <span>{{ item.status }} · {{ item.currentNode || 'n/a' }}</span>
+        <span>{{ item.status }} · {{ item.currentNode || '无' }}</span>
         <em>{{ item.connection.engine }} · {{ item.connection.databaseName }} · {{ item.updatedAt }}</em>
       </button>
     </div>

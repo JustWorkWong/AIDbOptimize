@@ -3,6 +3,8 @@ using AIDbOptimize.Application.Workflows.Services;
 using AIDbOptimize.Infrastructure.Persistence;
 using AIDbOptimize.Infrastructure.Workflows.Runtime;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace AIDbOptimize.Infrastructure.Workflows.Services;
 
@@ -11,7 +13,9 @@ namespace AIDbOptimize.Infrastructure.Workflows.Services;
 /// </summary>
 public sealed class DbConfigOptimizationWorkflowService(
     IDbContextFactory<ControlPlaneDbContext> dbContextFactory,
-    IWorkflowRuntime workflowRuntime)
+    IWorkflowRuntime workflowRuntime,
+    IServiceScopeFactory serviceScopeFactory,
+    ILogger<DbConfigOptimizationWorkflowService> logger)
     : IDbConfigOptimizationWorkflowService
 {
     public async Task<WorkflowSessionDetailDto> StartAsync(
@@ -20,24 +24,34 @@ public sealed class DbConfigOptimizationWorkflowService(
     {
         if (!Guid.TryParse(request.ConnectionId, out var connectionId))
         {
-            throw new InvalidOperationException("ConnectionId must be a valid Guid.");
+            throw new InvalidOperationException("连接 ID 必须是合法的 Guid。");
         }
 
-        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-        var connection = await dbContext.McpConnections
-            .AsNoTracking()
-            .SingleOrDefaultAsync(x => x.Id == connectionId, cancellationToken)
-            ?? throw new InvalidOperationException($"Connection not found: {request.ConnectionId}");
+        var command = new DbConfigWorkflowCommand(
+            connectionId,
+            string.IsNullOrWhiteSpace(request.RequestedBy) ? "frontend" : request.RequestedBy,
+            request.Notes,
+            request.Options.AllowFallbackSnapshot,
+            request.Options.RequireHumanReview,
+            request.Options.EnableEvidenceGrounding);
 
-        return await workflowRuntime.StartDbConfigAsync(
-            new DbConfigWorkflowCommand(
-                connectionId,
-                string.IsNullOrWhiteSpace(request.RequestedBy) ? "frontend" : request.RequestedBy,
-                request.Notes,
-                request.Options.AllowFallbackSnapshot,
-                request.Options.RequireHumanReview,
-                request.Options.EnableEvidenceGrounding),
-            cancellationToken);
+        var queued = await workflowRuntime.QueueStartDbConfigAsync(command, cancellationToken);
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                using var scope = serviceScopeFactory.CreateScope();
+                var runtime = scope.ServiceProvider.GetRequiredService<IWorkflowRuntime>();
+                await runtime.ContinueStartAsync(Guid.Parse(queued.SessionId), command, CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "异步启动工作流失败，SessionId={SessionId}", queued.SessionId);
+            }
+        });
+
+        return queued;
     }
 
     public async Task<WorkflowSessionDetailDto?> GetSessionAsync(
@@ -99,7 +113,10 @@ public sealed class DbConfigOptimizationWorkflowService(
             review,
             string.IsNullOrWhiteSpace(session.ResultPayloadJson) || session.ResultPayloadJson == "{}"
                 ? null
-                : new WorkflowResultDto(session.ResultType, session.ResultPayloadJson),
+                : new WorkflowResultDto(
+                    session.ResultType,
+                    session.ResultPayloadJson,
+                    WorkflowResultParser.TryParse(session.ResultPayloadJson)),
             summary,
             session.ErrorMessage,
             $"/api/workflows/{session.Id}/events",
@@ -143,7 +160,7 @@ public sealed class DbConfigOptimizationWorkflowService(
     {
         if (!Guid.TryParse(sessionId, out var workflowSessionId))
         {
-            throw new InvalidOperationException("sessionId must be a valid Guid.");
+            throw new InvalidOperationException("工作流会话 ID 必须是合法的 Guid。");
         }
 
         return await workflowRuntime.CancelAsync(workflowSessionId, cancellationToken);

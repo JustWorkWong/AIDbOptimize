@@ -79,13 +79,13 @@ public sealed class WorkflowReviewService(
 
         if (!Guid.TryParse(taskId, out var reviewTaskId))
         {
-            throw new InvalidOperationException("taskId must be a valid Guid.");
+            throw new InvalidOperationException("审核任务 ID 必须是合法的 Guid。");
         }
 
         var normalizedAction = (request.Action ?? string.Empty).Trim().ToLowerInvariant();
         if (normalizedAction is not ("approve" or "reject" or "adjust"))
         {
-            throw new InvalidOperationException("Only approve / reject / adjust are supported.");
+            throw new InvalidOperationException("仅支持 approve、reject、adjust 三种审核动作。");
         }
 
         WorkflowReviewAdjustment? normalizedAdjustment = null;
@@ -100,11 +100,11 @@ public sealed class WorkflowReviewService(
         await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var reviewTask = await dbContext.WorkflowReviewTasks
             .SingleOrDefaultAsync(x => x.Id == reviewTaskId, cancellationToken)
-            ?? throw new InvalidOperationException($"Review task not found: {taskId}");
+            ?? throw new InvalidOperationException($"未找到审核任务：{taskId}");
 
         if (reviewTask.Status != WorkflowReviewTaskStatus.Pending)
         {
-            throw new InvalidOperationException("This review task has already been processed.");
+            throw new InvalidOperationException("该审核任务已经处理完成，不能重复提交。");
         }
 
         var now = DateTimeOffset.UtcNow;

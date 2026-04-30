@@ -4,7 +4,7 @@ async function readJson<T>(input: RequestInfo | URL, init?: RequestInit): Promis
   const response = await fetch(input, init)
   if (!response.ok) {
     const errorText = await response.text()
-    throw new Error(errorText || `Request failed with status ${response.status}`)
+    throw new Error(errorText || `请求失败，状态码：${response.status}`)
   }
 
   return (await response.json()) as T
