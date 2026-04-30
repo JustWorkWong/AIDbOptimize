@@ -132,10 +132,11 @@ public sealed class DbConfigDiagnosisAgentExecutor(
                 ? Microsoft.Extensions.AI.ChatResponseFormat.Json
                 : Microsoft.Extensions.AI.ChatResponseFormat.ForJsonSchema<DbConfigDiagnosisAgentResponse>(SerializerOptions),
             Instructions = """
-You are a database configuration optimization assistant.
-Use only the provided evidence.
-Return JSON only.
-The JSON object must contain:
+你是数据库配置优化分析助手。
+你只能使用输入中的证据，不允许虚构环境信息或补全不存在的观测数据。
+你必须只返回 JSON，并且 title、summary、suggestion 等自然语言字段必须使用中文。
+如果缺少宿主资源上下文，不允许给出具体目标参数值或“调到 X GB / X MB / X%”这类结论，只能给出保守建议。
+JSON 对象必须包含：
 - title: string
 - summary: string
 - recommendations: array of { key: string, suggestion: string, severity: string, findingType: string, confidence: string, requiresMoreContext: boolean, impactSummary: string | null, evidenceReferences: string[], recommendationClass: string, appliesWhen: string | null, ruleId: string | null, ruleVersion: string | null }
@@ -143,7 +144,7 @@ The JSON object must contain:
 - missingContextItems: array of { reference: string, description: string, reason: string, sourceScope: string, severity: string }
 - collectionMetadata: array of { name: string, value: string, description: string | null }
 - warnings: array of strings
-Do not add markdown, explanations, or code fences.
+不要输出 Markdown，不要输出解释性前后缀，不要输出代码块。
 """
         };
     }

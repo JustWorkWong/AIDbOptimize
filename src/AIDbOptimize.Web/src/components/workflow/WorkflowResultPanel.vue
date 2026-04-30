@@ -15,7 +15,7 @@ const props = defineProps<{
 }>()
 
 const resultPreview = computed(() => {
-  return props.session?.result?.payloadJson ?? 'No result yet.'
+  return props.session?.result?.payloadJson ?? '当前还没有结果。'
 })
 
 const parsedReport = computed<WorkflowStructuredResult | null>(() => {
@@ -45,9 +45,9 @@ function metadataValue(name: string): WorkflowCollectionMetadata | undefined {
 
 <template>
   <article class="panel">
-    <h2>Result</h2>
+    <h2>结果</h2>
     <p v-if="!session" class="state-text">
-      Select a workflow session to inspect the final result and audit detail.
+      请选择一个工作流会话以查看最终结果和审计详情。
     </p>
 
     <template v-else>
@@ -59,21 +59,21 @@ function metadataValue(name: string): WorkflowCollectionMetadata | undefined {
 
         <div class="review-detail-grid">
           <div class="tip-card">
-            <strong>Recommendations</strong>
+            <strong>建议数</strong>
             <span>{{ parsedReport.recommendations.length }}</span>
           </div>
           <div class="tip-card">
-            <strong>Missing Context</strong>
+            <strong>缺失上下文</strong>
             <span>{{ parsedReport.missingContextItems.length }}</span>
           </div>
           <div class="tip-card">
-            <strong>Host Scope</strong>
-            <span>{{ metadataValue('resource_scope')?.value || 'unknown' }}</span>
+            <strong>宿主范围</strong>
+            <span>{{ metadataValue('resource_scope')?.value || '未知' }}</span>
           </div>
         </div>
 
         <section v-if="parsedReport.recommendations.length" class="structured-section">
-          <h3>Recommendations</h3>
+          <h3>建议详情</h3>
           <div class="structured-list">
             <article
               v-for="item in parsedReport.recommendations"
@@ -86,38 +86,38 @@ function metadataValue(name: string): WorkflowCollectionMetadata | undefined {
               </div>
               <p>{{ item.suggestion }}</p>
               <div class="meta-chip-row">
-                <span class="meta-chip">confidence: {{ item.confidence }}</span>
-                <span class="meta-chip">class: {{ item.recommendationClass }}</span>
-                <span class="meta-chip">rule: {{ item.ruleId || 'n/a' }}@{{ item.ruleVersion || 'n/a' }}</span>
-                <span v-if="item.requiresMoreContext" class="meta-chip warning">requires more context</span>
+                <span class="meta-chip">置信度：{{ item.confidence }}</span>
+                <span class="meta-chip">分类：{{ item.recommendationClass }}</span>
+                <span class="meta-chip">规则：{{ item.ruleId || '无' }}@{{ item.ruleVersion || '无' }}</span>
+                <span v-if="item.requiresMoreContext" class="meta-chip warning">需要更多上下文</span>
               </div>
-              <p v-if="item.appliesWhen" class="structured-note">Applies when: {{ item.appliesWhen }}</p>
-              <p v-if="item.impactSummary" class="structured-note">Impact: {{ item.impactSummary }}</p>
+              <p v-if="item.appliesWhen" class="structured-note">适用前提：{{ item.appliesWhen }}</p>
+              <p v-if="item.impactSummary" class="structured-note">影响说明：{{ item.impactSummary }}</p>
               <p v-if="item.evidenceReferences.length" class="structured-note">
-                Evidence refs: {{ item.evidenceReferences.join(', ') }}
+                证据引用：{{ item.evidenceReferences.join(', ') }}
               </p>
             </article>
           </div>
         </section>
 
         <section v-if="hostContextItems.length" class="structured-section">
-          <h3>Host Context</h3>
+          <h3>宿主上下文</h3>
           <div class="structured-list compact-grid">
             <article v-for="item in hostContextItems" :key="item.reference" class="structured-card">
               <strong>{{ item.reference }}</strong>
               <p>{{ displayValue(item) }}</p>
               <div class="meta-chip-row">
                 <span class="meta-chip">{{ item.sourceScope }}</span>
-                <span class="meta-chip">{{ item.isCached ? 'cached' : 'live' }}</span>
+                <span class="meta-chip">{{ item.isCached ? '缓存' : '实时' }}</span>
               </div>
-              <p class="structured-note">captured: {{ item.capturedAt || 'n/a' }}</p>
-              <p class="structured-note">expires: {{ item.expiresAt || 'n/a' }}</p>
+              <p class="structured-note">采集时间：{{ item.capturedAt || '无' }}</p>
+              <p class="structured-note">过期时间：{{ item.expiresAt || '无' }}</p>
             </article>
           </div>
         </section>
 
         <section v-if="parsedReport.missingContextItems.length" class="structured-section">
-          <h3>Missing Context</h3>
+          <h3>缺失上下文</h3>
           <div class="structured-list compact-grid">
             <article v-for="item in parsedReport.missingContextItems" :key="item.reference" class="structured-card">
               <strong>{{ item.reference }}</strong>
@@ -131,32 +131,32 @@ function metadataValue(name: string): WorkflowCollectionMetadata | undefined {
         </section>
 
         <section class="structured-section">
-          <h3>Collected Evidence</h3>
+          <h3>已采集证据</h3>
           <div class="structured-columns">
             <div>
-              <strong>Configuration</strong>
+              <strong>配置项</strong>
               <ul class="mini-list">
                 <li v-for="item in configurationItems" :key="item.reference">
                   {{ item.reference }} = {{ displayValue(item) }}
-                  <span class="mini-note">· {{ item.isCached ? 'cached' : 'live' }} · {{ item.capturedAt || 'n/a' }}</span>
+                  <span class="mini-note">· {{ item.isCached ? '缓存' : '实时' }} · {{ item.capturedAt || '无' }}</span>
                 </li>
               </ul>
             </div>
             <div>
-              <strong>Runtime</strong>
+              <strong>运行指标</strong>
               <ul class="mini-list">
                 <li v-for="item in runtimeItems" :key="item.reference">
                   {{ item.reference }} = {{ displayValue(item) }}
-                  <span class="mini-note">· {{ item.isCached ? 'cached' : 'live' }} · {{ item.capturedAt || 'n/a' }}</span>
+                  <span class="mini-note">· {{ item.isCached ? '缓存' : '实时' }} · {{ item.capturedAt || '无' }}</span>
                 </li>
               </ul>
             </div>
             <div>
-              <strong>Observability</strong>
+              <strong>观测能力</strong>
               <ul class="mini-list">
                 <li v-for="item in observabilityItems" :key="item.reference">
                   {{ item.reference }} = {{ displayValue(item) }}
-                  <span class="mini-note">· {{ item.isCached ? 'cached' : 'live' }} · {{ item.capturedAt || 'n/a' }}</span>
+                  <span class="mini-note">· {{ item.isCached ? '缓存' : '实时' }} · {{ item.capturedAt || '无' }}</span>
                 </li>
               </ul>
             </div>
@@ -171,27 +171,27 @@ function metadataValue(name: string): WorkflowCollectionMetadata | undefined {
 
       <div v-if="historyDetail" class="review-detail-grid">
         <div class="tip-card">
-          <strong>Node executions</strong>
+          <strong>节点执行</strong>
           <span>{{ historyDetail.nodeExecutions.length }}</span>
         </div>
         <div class="tip-card">
-          <strong>Tool executions</strong>
+          <strong>工具执行</strong>
           <span>{{ historyDetail.toolExecutions.length }}</span>
         </div>
         <div class="tip-card">
-          <strong>Reviews</strong>
+          <strong>审核记录</strong>
           <span>{{ historyDetail.reviews.length }}</span>
         </div>
       </div>
 
       <section v-if="historyDetail?.reviews.length" class="structured-section">
-        <h3>Review Decisions</h3>
+        <h3>审核决策</h3>
         <div class="structured-list compact-grid">
           <article v-for="item in historyDetail.reviews" :key="item.taskId" class="structured-card">
             <strong>{{ item.status }}</strong>
-            <p>{{ item.comment || 'No comment' }}</p>
+            <p>{{ item.comment || '无说明' }}</p>
             <div class="meta-chip-row">
-              <span class="meta-chip">{{ item.reviewer || 'n/a' }}</span>
+              <span class="meta-chip">{{ item.reviewer || '无' }}</span>
               <span class="meta-chip">{{ item.reviewedAt || item.createdAt }}</span>
             </div>
           </article>

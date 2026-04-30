@@ -35,8 +35,8 @@ const emit = defineEmits<{
     </p>
     <div v-if="extractWorkflowStructuredResult(session?.result)" class="review-summary-card compact-list">
       <strong>{{ extractWorkflowStructuredResult(session?.result)?.title }}</strong>
-      <span>Recommendations: {{ extractWorkflowStructuredResult(session?.result)?.recommendations.length }}</span>
-      <span>Missing context: {{ extractWorkflowStructuredResult(session?.result)?.missingContextItems.length }}</span>
+      <span>建议数：{{ extractWorkflowStructuredResult(session?.result)?.recommendations.length }}</span>
+      <span>缺失上下文：{{ extractWorkflowStructuredResult(session?.result)?.missingContextItems.length }}</span>
     </div>
     <p v-if="session && !events.length" class="state-text">
       暂无事件。

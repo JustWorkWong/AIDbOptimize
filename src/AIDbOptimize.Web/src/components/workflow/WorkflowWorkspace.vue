@@ -211,9 +211,9 @@ async function handleReplayRefresh(): Promise<void> {
 
 <template>
   <section class="panel">
-    <h2>Workflow Workspace</h2>
+    <h2>工作流工作区</h2>
     <p class="section-copy">
-      Launch db-config workflows, watch live events, review pending reports, and inspect history detail.
+      启动数据库配置优化工作流，查看实时事件，处理待审核报告，并检查历史详情。
     </p>
   </section>
 
