@@ -98,6 +98,7 @@ builder.Services.AddScoped<IWorkflowHistoryRepository, WorkflowHistoryRepository
 builder.Services.AddScoped<IAgentSessionPersistenceService, AgentSessionPersistenceService>();
 builder.Services.AddScoped<IAgentSummaryService, AgentSummaryService>();
 builder.Services.AddScoped<DbConfigInputValidationExecutor>();
+builder.Services.AddScoped<IDbConfigHostContextCollector, McpDbConfigHostContextCollector>();
 builder.Services.AddScoped<DbConfigSnapshotCollectorExecutor>();
 builder.Services.AddScoped<DbConfigRuleAnalysisExecutor>();
 builder.Services.AddScoped<DbConfigDiagnosisReportBuilder>();
