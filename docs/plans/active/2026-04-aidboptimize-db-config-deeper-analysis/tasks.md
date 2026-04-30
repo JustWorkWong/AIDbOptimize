@@ -36,7 +36,8 @@
 - [ ] PostgreSQL 能采到 `shared_buffers / work_mem / checkpoint / cache-hit` 相关值
 - [x] 缺失上下文时以结构化缺失项进入 evidence
 - [x] 宿主上下文字段能稳定输出 `resource_scope / memory_limit / memory_available / cpu_limit / disk_available`
-- [ ] 至少一条容器场景和一条托管/不可见场景被验证
+- [x] 至少一条容器场景被验证
+- [ ] 至少一条托管/不可见场景被验证
 
 ## 阶段 3：规则引擎增强
 

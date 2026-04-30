@@ -1,5 +1,6 @@
 using System.Text.Json;
 using AIDbOptimize.Domain.Mcp.Enums;
+using AIDbOptimize.Domain.Mcp.Models;
 using AIDbOptimize.Infrastructure.Persistence;
 using AIDbOptimize.Infrastructure.Persistence.Entities;
 using AIDbOptimize.Infrastructure.Security;
@@ -51,6 +52,31 @@ internal sealed class ControlPlaneDefaultSeedHostedService(
             isDefault: true,
             cancellationToken: cancellationToken);
 
+        var hostContextServerScriptPath = ResolveHostContextServerScriptPath();
+        if (!string.IsNullOrWhiteSpace(hostContextServerScriptPath))
+        {
+            var hostContextConnection = await UpsertConnectionAsync(
+                dbContext,
+                name: "host-context-default",
+                engine: DatabaseEngine.PostgreSql,
+                displayName: "Host Context MCP",
+                databaseName: "host_context",
+                serverCommand: "node",
+                serverArgumentsJson: JsonSerializer.Serialize(new[] { hostContextServerScriptPath }),
+                environmentJson: "{}",
+                databaseConnectionString: string.Empty,
+                isDefault: false,
+                cancellationToken: cancellationToken);
+
+            hostContextConnection.Status = McpConnectionStatus.Ready;
+            hostContextConnection.LastDiscoveredAt = DateTimeOffset.UtcNow;
+            await UpsertHostContextToolsAsync(dbContext, hostContextConnection.Id, cancellationToken);
+        }
+        else
+        {
+            logger.LogWarning("HostContext MCP server script was not found. Default host-context connection seed was skipped.");
+        }
+
         await dbContext.SaveChangesAsync(cancellationToken);
         logger.LogInformation("Default MCP connections are ready.");
     }
@@ -60,7 +86,7 @@ internal sealed class ControlPlaneDefaultSeedHostedService(
         return Task.CompletedTask;
     }
 
-    private async Task UpsertConnectionAsync(
+    private async Task<McpConnectionEntity> UpsertConnectionAsync(
         ControlPlaneDbContext dbContext,
         string name,
         DatabaseEngine engine,
@@ -97,6 +123,8 @@ internal sealed class ControlPlaneDefaultSeedHostedService(
         entity.Status = McpConnectionStatus.Draft;
         entity.LastDiscoveredAt = null;
         entity.UpdatedAt = DateTimeOffset.UtcNow;
+
+        return entity;
     }
 
     private static string BuildPostgreSqlArgumentsJson(string connectionString)
@@ -140,5 +168,125 @@ internal sealed class ControlPlaneDefaultSeedHostedService(
         return configuration.GetConnectionString(primaryName)
             ?? configuration.GetConnectionString(secondaryName)
             ?? defaultValue;
+    }
+
+    private async Task UpsertHostContextToolsAsync(
+        ControlPlaneDbContext dbContext,
+        Guid connectionId,
+        CancellationToken cancellationToken)
+    {
+        var now = DateTimeOffset.UtcNow;
+        foreach (var definition in HostContextToolDefinitions(connectionId))
+        {
+            var entity = await dbContext.McpTools
+                .FirstOrDefaultAsync(
+                    x => x.ConnectionId == connectionId && x.ToolName == definition.ToolName,
+                    cancellationToken);
+
+            if (entity is null)
+            {
+                dbContext.McpTools.Add(new McpToolEntity
+                {
+                    Id = Guid.NewGuid(),
+                    ConnectionId = connectionId,
+                    ToolName = definition.ToolName,
+                    DisplayName = definition.DisplayName,
+                    Description = definition.Description ?? string.Empty,
+                    InputSchemaJson = definition.InputSchemaJson,
+                    ApprovalMode = definition.ApprovalMode,
+                    IsEnabled = definition.IsEnabled,
+                    IsWriteTool = definition.IsWriteTool,
+                    CreatedAt = now,
+                    UpdatedAt = now
+                });
+                continue;
+            }
+
+            entity.DisplayName = definition.DisplayName;
+            entity.Description = definition.Description ?? string.Empty;
+            entity.InputSchemaJson = definition.InputSchemaJson;
+            entity.ApprovalMode = definition.ApprovalMode;
+            entity.IsEnabled = definition.IsEnabled;
+            entity.IsWriteTool = definition.IsWriteTool;
+            entity.UpdatedAt = now;
+        }
+    }
+
+    private static IReadOnlyList<McpToolDefinition> HostContextToolDefinitions(Guid connectionId)
+    {
+        return
+        [
+            Tool("resolve_runtime_target", "Resolve Runtime Target", "Resolve a db connection into container, host, or managed-service scope.",
+                """
+                {
+                  "type":"object",
+                  "properties":{
+                    "connectionId":{"type":"string"},
+                    "engine":{"type":"string"},
+                    "displayName":{"type":"string"},
+                    "databaseName":{"type":"string"},
+                    "host":{"type":"string"},
+                    "port":{"type":["integer","string"]},
+                    "metadata":{"type":"object"}
+                  }
+                }
+                """),
+            Tool("get_container_limits", "Get Container Limits", "Read container resource limits and mount metadata.",
+                """{"type":"object","properties":{"targetId":{"type":"string"},"targetName":{"type":"string"}}}"""),
+            Tool("get_container_stats", "Get Container Stats", "Read current container runtime stats.",
+                """{"type":"object","properties":{"targetId":{"type":"string"},"targetName":{"type":"string"}}}"""),
+            Tool("get_disk_usage", "Get Disk Usage", "Read disk usage for the target container or host fallback.",
+                """{"type":"object","properties":{"targetId":{"type":"string"},"targetName":{"type":"string"},"mode":{"type":"string"}}}"""),
+            Tool("get_host_memory", "Get Host Memory", "Read host memory totals and availability.",
+                """{"type":"object","properties":{"targetId":{"type":"string"},"targetName":{"type":"string"}}}"""),
+            Tool("get_host_cpu", "Get Host CPU", "Read host CPU core count and optional current usage.",
+                """{"type":"object","properties":{"targetId":{"type":"string"},"targetName":{"type":"string"}}}"""),
+            Tool("get_process_limits", "Get Process Limits", "Read process-level runtime context.",
+                """{"type":"object","properties":{"targetId":{"type":"string"},"targetName":{"type":"string"}}}"""),
+            Tool("get_managed_service_profile", "Get Managed Service Profile", "Read managed-service profile metadata when available.",
+                """{"type":"object","properties":{"targetId":{"type":"string"},"targetName":{"type":"string"}}}""")
+        ];
+
+        McpToolDefinition Tool(string toolName, string displayName, string description, string inputSchemaJson)
+        {
+            return new McpToolDefinition(
+                Guid.Empty,
+                connectionId,
+                toolName,
+                displayName,
+                description,
+                inputSchemaJson,
+                ToolApprovalMode.NoApproval,
+                true,
+                false);
+        }
+    }
+
+    private string? ResolveHostContextServerScriptPath()
+    {
+        var candidateDirectories = new List<string>();
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null)
+        {
+            candidateDirectories.Add(directory.FullName);
+            directory = directory.Parent;
+        }
+
+        foreach (var baseDirectory in candidateDirectories)
+        {
+            var candidate = Path.GetFullPath(Path.Combine(baseDirectory, "AIDbOptimize.HostContextMcp", "server.mjs"));
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
+
+            candidate = Path.GetFullPath(Path.Combine(baseDirectory, "src", "AIDbOptimize.HostContextMcp", "server.mjs"));
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        return null;
     }
 }
