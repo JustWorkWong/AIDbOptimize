@@ -277,7 +277,7 @@ public sealed class DbConfigQualityGateTests
             await Task.CompletedTask;
         });
 
-        Assert.Contains("specific target values", error.InnerException?.Message ?? error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("具体目标参数值", error.InnerException?.Message ?? error.Message, StringComparison.Ordinal);
     }
 
     [Fact]
