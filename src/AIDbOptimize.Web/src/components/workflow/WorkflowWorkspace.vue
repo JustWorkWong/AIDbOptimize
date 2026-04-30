@@ -120,14 +120,16 @@ function connectToEvents(sessionId: string): void {
     event: async (event) => {
       events.value = [...events.value, event]
       sseConnected.value = true
+      await refreshSelectedSession(sessionId)
       if (
         event.eventName === 'workflow.completed' ||
         event.eventName === 'workflow.failed' ||
         event.eventName === 'workflow.cancelled' ||
+        event.eventName === 'review.requested' ||
         event.eventName === 'review.resolved' ||
-        event.eventName === 'checkpoint.saved'
+        event.eventName === 'checkpoint.saved' ||
+        event.eventName === 'executor.completed'
       ) {
-        await refreshSelectedSession(sessionId)
         await loadSessions()
       }
     },

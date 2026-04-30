@@ -140,7 +140,5 @@ return;
 
 static string BuildLocalUrl(int port)
 {
-    // 管理面板统一使用显式 HTTP，并改用 127.0.0.1，
-    // 避免部分浏览器对 localhost 做 HTTPS-First / 自动升级后打不开。
-    return $"http://127.0.0.1:{port.ToString(CultureInfo.InvariantCulture)}/";
+    return $"https://localhost:{port.ToString(CultureInfo.InvariantCulture)}/";
 }

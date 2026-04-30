@@ -164,7 +164,10 @@ function metadataValue(name: string): WorkflowCollectionMetadata | undefined {
         </section>
       </div>
 
-      <pre class="result-box">{{ resultPreview }}</pre>
+      <details class="command-details">
+        <summary>查看原始结果 JSON</summary>
+        <pre class="result-box">{{ resultPreview }}</pre>
+      </details>
 
       <div v-if="historyDetail" class="review-detail-grid">
         <div class="tip-card">
