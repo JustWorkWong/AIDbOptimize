@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { ReviewTaskDetail, WorkflowSessionDetail } from '../../models/workflow'
+import { extractWorkflowStructuredResult } from '../../models/workflow'
 
 defineProps<{
   session: WorkflowSessionDetail | null
@@ -15,6 +16,10 @@ const emit = defineEmits<{
 const reviewer = defineModel<string>('reviewer', { default: 'frontend-reviewer' })
 const comment = defineModel<string>('comment', { default: '' })
 const adjustmentsJson = defineModel<string>('adjustmentsJson', { default: '' })
+
+function parsedReviewReport(review: ReviewTaskDetail | null) {
+  return review?.parsedReport ?? extractWorkflowStructuredResult(review) ?? null
+}
 </script>
 
 <template>
@@ -39,6 +44,46 @@ const adjustmentsJson = defineModel<string>('adjustmentsJson', { default: '' })
         <strong>{{ review.title }}</strong>
         <span>Status: {{ review.status }}</span>
         <span>Session: {{ session.sessionId }}</span>
+      </div>
+
+      <div v-if="parsedReviewReport(review)" class="structured-report">
+        <div class="review-detail-grid">
+          <div class="tip-card">
+            <strong>Recommendations</strong>
+            <span>{{ parsedReviewReport(review)?.recommendations.length }}</span>
+          </div>
+          <div class="tip-card">
+            <strong>Missing Context</strong>
+            <span>{{ parsedReviewReport(review)?.missingContextItems.length }}</span>
+          </div>
+          <div class="tip-card">
+            <strong>Warnings</strong>
+            <span>{{ parsedReviewReport(review)?.warnings.length }}</span>
+          </div>
+        </div>
+
+        <div class="structured-list">
+          <article
+            v-for="item in parsedReviewReport(review)?.recommendations"
+            :key="item.key + item.ruleId"
+            class="structured-card"
+          >
+            <div class="structured-head">
+              <strong>{{ item.key }}</strong>
+              <span>{{ item.severity }} · {{ item.findingType }}</span>
+            </div>
+            <p>{{ item.suggestion }}</p>
+            <div class="meta-chip-row">
+              <span class="meta-chip">confidence: {{ item.confidence }}</span>
+              <span class="meta-chip">class: {{ item.recommendationClass }}</span>
+              <span class="meta-chip">rule: {{ item.ruleId || 'n/a' }}@{{ item.ruleVersion || 'n/a' }}</span>
+            </div>
+            <p v-if="item.appliesWhen" class="structured-note">Applies when: {{ item.appliesWhen }}</p>
+            <p v-if="item.evidenceReferences.length" class="structured-note">
+              Evidence refs: {{ item.evidenceReferences.join(', ') }}
+            </p>
+          </article>
+        </div>
       </div>
 
       <div class="result-box">

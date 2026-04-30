@@ -9,6 +9,7 @@ public sealed record ReviewTaskDetailDto(
     string Title,
     string Status,
     string PayloadJson,
+    WorkflowStructuredResultDto? ParsedReport,
     DateTimeOffset CreatedAt,
     DateTimeOffset? ReviewedAt,
     string? Reviewer,

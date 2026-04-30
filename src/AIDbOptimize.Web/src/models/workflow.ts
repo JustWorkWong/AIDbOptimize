@@ -191,6 +191,7 @@ export interface ReviewTaskDetail {
   title: string
   status: string
   payloadJson: string
+  parsedReport: WorkflowStructuredResult | null
   createdAt: string
   reviewedAt: string | null
   reviewer: string | null
@@ -206,6 +207,17 @@ export interface WorkflowReplayEvent {
   occurredAt: string | null
   message: string | null
   payload: unknown
+}
+
+export interface WorkflowHostContextSummary {
+  resourceScope: string | null
+  status: string | null
+  targetName: string | null
+  targetId: string | null
+  sourceTool: string | null
+  topRowCount: string | null
+  evidenceCount: number
+  cachedEvidenceCount: number
 }
 
 export interface WorkflowReviewSubmission {
@@ -240,3 +252,140 @@ export const emptyWorkflowRequest = (): DbConfigWorkflowRequest => ({
     enableEvidenceGrounding: true,
   },
 })
+
+const workflowPayloadKeys = ['parsedReport', 'payload', 'result', 'report', 'data', 'snapshot'] as const
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+function looksLikeStructuredWorkflowResult(value: Record<string, unknown>): boolean {
+  return (
+    'recommendations' in value ||
+    'evidenceItems' in value ||
+    'missingContextItems' in value ||
+    'collectionMetadata' in value ||
+    ('title' in value && 'summary' in value)
+  )
+}
+
+function extractWorkflowStructuredResultInternal(
+  source: unknown,
+  visited: Set<unknown>,
+  depth: number,
+): WorkflowStructuredResult | null {
+  if (depth > 5 || source === null || source === undefined) {
+    return null
+  }
+
+  if (typeof source === 'string') {
+    return extractWorkflowStructuredResultInternal(parseWorkflowJson(source), visited, depth + 1)
+  }
+
+  if (!isRecord(source) || visited.has(source)) {
+    return null
+  }
+
+  visited.add(source)
+
+  if (looksLikeStructuredWorkflowResult(source)) {
+    return source as unknown as WorkflowStructuredResult
+  }
+
+  const payloadJson = source.payloadJson
+  if (typeof payloadJson === 'string') {
+    const parsedFromPayloadJson = extractWorkflowStructuredResultInternal(payloadJson, visited, depth + 1)
+    if (parsedFromPayloadJson) {
+      return parsedFromPayloadJson
+    }
+  }
+
+  for (const key of workflowPayloadKeys) {
+    const nested = source[key]
+    const parsedNested = extractWorkflowStructuredResultInternal(nested, visited, depth + 1)
+    if (parsedNested) {
+      return parsedNested
+    }
+  }
+
+  return null
+}
+
+export function parseWorkflowJson<T = unknown>(value: string | null | undefined): T | null {
+  if (!value?.trim()) {
+    return null
+  }
+
+  try {
+    return JSON.parse(value) as T
+  } catch {
+    return null
+  }
+}
+
+export function extractWorkflowStructuredResult(source: unknown): WorkflowStructuredResult | null {
+  return extractWorkflowStructuredResultInternal(source, new Set<unknown>(), 0)
+}
+
+export function getWorkflowMetadataValue(
+  metadata: WorkflowCollectionMetadata[],
+  name: string,
+): string | null {
+  const item = metadata.find((entry) => entry.name === name)
+  return item?.value ?? null
+}
+
+export function isHostContextEvidence(item: WorkflowEvidenceItem): boolean {
+  return item.category === 'hostContext' || item.sourceScope.toLowerCase() !== 'db'
+}
+
+export function summarizeWorkflowHostContext(
+  report: WorkflowStructuredResult | null | undefined,
+): WorkflowHostContextSummary | null {
+  if (!report) {
+    return null
+  }
+
+  const hostEvidence = report.evidenceItems.filter(isHostContextEvidence)
+  const resourceScope =
+    getWorkflowMetadataValue(report.collectionMetadata, 'resource_scope') ??
+    hostEvidence[0]?.sourceScope ??
+    null
+  const status = getWorkflowMetadataValue(report.collectionMetadata, 'host_context_status')
+  const targetName = getWorkflowMetadataValue(report.collectionMetadata, 'target_name')
+  const targetId = getWorkflowMetadataValue(report.collectionMetadata, 'target_id')
+  const sourceTool = getWorkflowMetadataValue(report.collectionMetadata, 'topn_source_tool')
+  const topRowCount = getWorkflowMetadataValue(report.collectionMetadata, 'topn_row_count')
+
+  if (
+    !resourceScope &&
+    !status &&
+    !targetName &&
+    !targetId &&
+    !sourceTool &&
+    !topRowCount &&
+    hostEvidence.length === 0
+  ) {
+    return null
+  }
+
+  return {
+    resourceScope,
+    status,
+    targetName,
+    targetId,
+    sourceTool,
+    topRowCount,
+    evidenceCount: hostEvidence.length,
+    cachedEvidenceCount: hostEvidence.filter((item) => item.isCached).length,
+  }
+}
+
+export function formatWorkflowDateTime(value: string | null | undefined): string {
+  if (!value) {
+    return 'n/a'
+  }
+
+  const parsed = new Date(value)
+  return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString()
+}

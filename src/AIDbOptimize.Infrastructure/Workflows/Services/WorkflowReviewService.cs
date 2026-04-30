@@ -56,6 +56,7 @@ public sealed class WorkflowReviewService(
                 x.Title,
                 x.Status.ToString(),
                 x.PayloadJson,
+                WorkflowResultParser.TryParse(x.PayloadJson),
                 x.CreatedAt,
                 x.CompletedAt,
                 x.DecisionBy,

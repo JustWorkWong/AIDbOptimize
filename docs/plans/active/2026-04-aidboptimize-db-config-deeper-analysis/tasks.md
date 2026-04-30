@@ -59,46 +59,46 @@
 
 ## 阶段 4：grounding 与 agent 增强
 
-- [ ] `DbConfigGroundingExecutor` 支持多 evidence refs 校验
-- [ ] `RecommendationSchemaValidator` 扩展到二期 recommendation 结构
-- [ ] `PromptInputBuilder` 扩展为 `configuration / runtime / host / observability / missing-context` 分块输入
-- [ ] `DbConfigDiagnosisAgentExecutor` 输出二期 recommendation 结构
-- [ ] 保持 DeepSeek / Qwen 的 `ChatResponseFormat.Json + 手动反序列化 + 严格抛错`
-- [ ] 缺少宿主资源上下文时，禁止 agent 产出“具体推荐值”式结论
-- [ ] 把 `ruleId / ruleVersion` 透传到最终结果和 history
+- [x] `DbConfigGroundingExecutor` 支持多 evidence refs 校验
+- [x] `RecommendationSchemaValidator` 扩展到二期 recommendation 结构
+- [x] `PromptInputBuilder` 扩展为 `configuration / runtime / host / observability / missing-context` 分块输入
+- [x] `DbConfigDiagnosisAgentExecutor` 输出二期 recommendation 结构
+- [x] 保持 DeepSeek / Qwen 的 `ChatResponseFormat.Json + 手动反序列化 + 严格抛错`
+- [x] 缺少宿主资源上下文时，禁止 agent 产出“具体推荐值”式结论
+- [x] 把 `ruleId / ruleVersion` 透传到最终结果和 history
 
 验收：
-- [ ] 新 recommendation 结构全部过 schema 校验
-- [ ] grounding 不再误杀真实 query 场景
-- [ ] agent 输出中包含 `confidence / impact / evidence refs / appliesWhen`
+- [x] 新 recommendation 结构全部过 schema 校验
+- [x] grounding 不再误杀真实 query 场景
+- [x] agent 输出中包含 `confidence / impact / evidence refs / appliesWhen`
 
 ## 阶段 5：前端与 history 展示增强
 
-- [ ] Workflow 结果面板展示 `findingType / confidence / requiresMoreContext / impactSummary`
-- [ ] Workflow 结果面板展示 `recommendationClass / appliesWhen / ruleId / ruleVersion`
-- [ ] History detail 展示扩展 evidence
-- [ ] Replay / Review 面板能展示 richer recommendation 结构
-- [ ] 前端展示缺失上下文项与缺失原因
-- [ ] 前端展示宿主资源上下文摘要与来源作用域
-- [ ] 前端展示 evidence 的 `capturedAt / isCached`
+- [x] Workflow 结果面板展示 `findingType / confidence / requiresMoreContext / impactSummary`
+- [x] Workflow 结果面板展示 `recommendationClass / appliesWhen / ruleId / ruleVersion`
+- [x] History detail 展示扩展 evidence
+- [x] Replay / Review 面板能展示 richer recommendation 结构
+- [x] 前端展示缺失上下文项与缺失原因
+- [x] 前端展示宿主资源上下文摘要与来源作用域
+- [x] 前端展示 evidence 的 `capturedAt / isCached`
 
 验收：
-- [ ] 前端能看出建议是基于真实值还是保守降级
-- [ ] History detail 能看出采集值、规则结果、review 决策
-- [ ] 前端能区分 `container / host / managed-service / unknown`
+- [x] 前端能看出建议是基于真实值还是保守降级
+- [x] History detail 能看出采集值、规则结果、review 决策
+- [x] 前端能区分 `container / host / managed-service / unknown`
 
 ## 阶段 6：验证与收尾
 
-- [ ] 新增 MySQL 真实 query 场景集成测试
-- [ ] 新增 PostgreSQL 真实 query 场景集成测试
+- [x] 新增 MySQL 真实 query 场景集成测试
+- [x] 新增 PostgreSQL 真实 query 场景集成测试
 - [x] 新增 richer evidence 结构单测
-- [ ] 人工验证 MySQL / PostgreSQL 各至少一条完整闭环
-- [ ] 核查控制面库里新增 evidence / 规则字段是否完整
-- [ ] 人工验证至少一条“缺少宿主上下文的保守降级”场景
-- [ ] 人工验证至少一条托管数据库或不可见宿主场景
+- [x] 人工验证 MySQL / PostgreSQL 各至少一条完整闭环
+- [x] 核查控制面库里新增 evidence / 规则字段是否完整
+- [x] 人工验证至少一条“缺少宿主上下文的保守降级”场景
+- [x] 人工验证至少一条托管数据库或不可见宿主场景
 
 验收：
-- [ ] 自动化测试通过
-- [ ] 至少两条真实闭环会话跑通
-- [ ] 建议结果方向正确、证据明确、降级合理
-- [ ] 建议结果明确区分 `tuning / observability / capacity-planning / hygiene`
+- [x] 自动化测试通过
+- [x] 至少两条真实闭环会话跑通
+- [x] 建议结果方向正确、证据明确、降级合理
+- [x] 建议结果明确区分 `tuning / observability / capacity-planning / hygiene`

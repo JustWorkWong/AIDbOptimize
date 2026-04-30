@@ -36,14 +36,13 @@ public sealed class DbConfigDiagnosisAgentExecutor(
         string optimizationGoal,
         DbConfigEvidencePack evidence)
     {
-        var evidenceJson = JsonSerializer.Serialize(evidence, SerializerOptions);
         return PromptInputBuilder.BuildDbConfigPrompt(
             displayName,
             databaseName,
             engine,
             optimizationGoal,
             notes: null,
-            evidenceJson);
+            evidence);
     }
 
     public async Task<DbConfigDiagnosisExecutionResult> ExecuteAsync(
@@ -77,6 +76,7 @@ public sealed class DbConfigDiagnosisAgentExecutor(
 
         var value = JsonSerializer.Deserialize<DbConfigDiagnosisAgentResponse>(responseText, SerializerOptions)
             ?? throw new InvalidOperationException("MAF diagnosis agent returned invalid JSON.");
+        EnforceNoSpecificTargetValuesWithoutHostContext(evidence, value);
 
         var reportJson = JsonSerializer.Serialize(new
         {
@@ -154,6 +154,43 @@ Do not add markdown, explanations, or code fences.
             || options.Model.Contains("deepseek", StringComparison.OrdinalIgnoreCase)
             || options.Endpoint.Contains("dashscope", StringComparison.OrdinalIgnoreCase)
             || options.Endpoint.Contains("aliyuncs", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static void EnforceNoSpecificTargetValuesWithoutHostContext(
+        DbConfigEvidencePack evidence,
+        DbConfigDiagnosisAgentResponse response)
+    {
+        if (evidence.HostContextItems.Count > 0)
+        {
+            return;
+        }
+
+        foreach (var recommendation in response.Recommendations)
+        {
+            if (recommendation.RecommendationClass is not ("tuning" or "capacity-planning"))
+            {
+                continue;
+            }
+
+            var text = $"{recommendation.Suggestion} {recommendation.AppliesWhen} {recommendation.ImpactSummary}";
+            if (ContainsSpecificTargetValue(text))
+            {
+                throw new InvalidOperationException("Host context is missing, so the agent must not emit specific target values.");
+            }
+        }
+    }
+
+    private static bool ContainsSpecificTargetValue(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return false;
+        }
+
+        return System.Text.RegularExpressions.Regex.IsMatch(
+            text,
+            @"(\d+(\.\d+)?\s*(KB|MB|GB|TB|%|cores?))|(调整到|设置为|set to|tune to)",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
     }
 }
 

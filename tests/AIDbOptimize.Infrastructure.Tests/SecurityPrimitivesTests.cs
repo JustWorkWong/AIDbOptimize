@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using System.Text;
 using Xunit;
+using AIDbOptimize.Domain.DbConfigOptimization.Models;
 
 namespace AIDbOptimize.Infrastructure.Tests;
 
@@ -61,10 +62,21 @@ public sealed class SecurityPrimitivesTests
             engine: "PostgreSql",
             optimizationGoal: "降低慢查询",
             notes: "连接串 Host=localhost;Password=Secret123!",
-            evidenceJson: """{"shared_buffers":"256MB"}""");
+            evidence: new DbConfigEvidencePack(
+                DatabaseEngine.PostgreSql,
+                "appdb",
+                "collector",
+                [
+                    new DbConfigRecommendation("shared_buffers", "建议评估 shared_buffers。", "medium")
+                ],
+                [
+                    new DbConfigEvidenceItem("collector", "shared_buffers", "shared_buffers", RawValue: "256MB", NormalizedValue: "256MB")
+                ],
+                Array.Empty<string>()));
 
         Assert.Contains("postgres-main", context, StringComparison.Ordinal);
         Assert.Contains("降低慢查询", context, StringComparison.Ordinal);
+        Assert.Contains("Configuration Summary", context, StringComparison.Ordinal);
         Assert.DoesNotContain("Secret123!", context, StringComparison.Ordinal);
         Assert.Contains("Password=***", context, StringComparison.Ordinal);
     }

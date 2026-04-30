@@ -2,6 +2,7 @@ using System.Text.Json;
 using AIDbOptimize.Domain.DbConfigOptimization.Models;
 using AIDbOptimize.Domain.Mcp.Enums;
 using AIDbOptimize.Infrastructure.Workflows.Pipeline;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace AIDbOptimize.Infrastructure.Tests;
@@ -39,11 +40,39 @@ public sealed class DbConfigQualityGateTests
           "title":"db-config report",
           "summary":"Adjust shared_buffers.",
           "recommendations":[
-            {"key":"shared_buffers","suggestion":"Adjust shared_buffers.","severity":"medium"}
+            {
+              "key":"shared_buffers",
+              "suggestion":"Adjust shared_buffers.",
+              "severity":"medium",
+              "findingType":"cache",
+              "confidence":"medium",
+              "requiresMoreContext":false,
+              "impactSummary":"cache pressure",
+              "evidenceReferences":["shared_buffers"],
+              "recommendationClass":"tuning",
+              "appliesWhen":"cache pressure is visible",
+              "ruleId":"postgres.shared-buffers.reassessment",
+              "ruleVersion":"2026-04-30"
+            }
           ],
           "evidenceItems":[
-            {"sourceType":"config","reference":"work_mem","description":"Only work_mem was collected."}
+            {
+              "sourceType":"config",
+              "reference":"work_mem",
+              "description":"Only work_mem was collected.",
+              "category":"configuration",
+              "rawValue":"4MB",
+              "normalizedValue":"4MB",
+              "unit":"bytes-or-engine-unit",
+              "sourceScope":"db",
+              "capturedAt":null,
+              "expiresAt":null,
+              "isCached":false,
+              "collectionMethod":"query"
+            }
           ],
+          "missingContextItems":[],
+          "collectionMetadata":[],
           "warnings":[]
         }
         """;
@@ -81,12 +110,35 @@ public sealed class DbConfigQualityGateTests
               "key":"observability-gap",
               "suggestion":"Enable better observability.",
               "severity":"warning",
-              "evidenceReferences":["slow_query_log"]
+              "findingType":"observability-gap",
+              "confidence":"high",
+              "requiresMoreContext":false,
+              "impactSummary":"missing observability",
+              "evidenceReferences":["slow_query_log"],
+              "recommendationClass":"observability",
+              "appliesWhen":"slow query visibility is missing",
+              "ruleId":"generic.observability-gap",
+              "ruleVersion":"2026-04-30"
             }
           ],
           "evidenceItems":[
-            {"sourceType":"config","reference":"slow_query_log","description":"Slow query log state."}
+            {
+              "sourceType":"config",
+              "reference":"slow_query_log",
+              "description":"Slow query log state.",
+              "category":"observability",
+              "rawValue":"OFF",
+              "normalizedValue":"OFF",
+              "unit":null,
+              "sourceScope":"db",
+              "capturedAt":null,
+              "expiresAt":null,
+              "isCached":false,
+              "collectionMethod":"query"
+            }
           ],
+          "missingContextItems":[],
+          "collectionMetadata":[],
           "warnings":[]
         }
         """;
@@ -118,12 +170,114 @@ public sealed class DbConfigQualityGateTests
               "ruleVersion":"2026-04-30"
             }
           ],
-          "evidenceItems":[],
+          "evidenceItems":[
+            {
+              "sourceType":"collector",
+              "reference":"max_connections",
+              "description":"max_connections",
+              "category":"configuration",
+              "rawValue":"500",
+              "normalizedValue":"500",
+              "unit":null,
+              "sourceScope":"db",
+              "capturedAt":null,
+              "expiresAt":null,
+              "isCached":false,
+              "collectionMethod":"query"
+            }
+          ],
+          "missingContextItems":[],
+          "collectionMetadata":[],
           "warnings":[]
         }
         """;
 
         validator.Validate(json);
+    }
+
+    [Fact]
+    public async Task DiagnosisAgentExecutor_RejectsSpecificTargetValue_WhenHostContextIsMissing()
+    {
+        var evidence = new DbConfigEvidencePack(
+            DatabaseEngine.MySql,
+            "orders",
+            "collector",
+            [
+                new DbConfigRecommendation(
+                    "innodb_buffer_pool_size",
+                    "review",
+                    "medium",
+                    recommendationClass: "tuning")
+            ],
+            [
+                new DbConfigEvidenceItem("collector", "innodb_buffer_pool_size", "buffer pool", RawValue: "256MB", NormalizedValue: "256MB")
+            ],
+            Array.Empty<string>(),
+            configurationItems:
+            [
+                new DbConfigEvidenceItem("collector", "innodb_buffer_pool_size", "buffer pool", RawValue: "256MB", NormalizedValue: "256MB")
+            ],
+            missingContextItems:
+            [
+                new DbConfigMissingContextItem("memory_limit_bytes", "missing", "unsupported")
+            ]);
+
+        var resultType = typeof(DbConfigDiagnosisAgentExecutor);
+        var method = resultType.GetMethod("EnforceNoSpecificTargetValuesWithoutHostContext", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)
+            ?? throw new InvalidOperationException("Guard method was not found.");
+        var responseType = resultType.Assembly.GetType("AIDbOptimize.Infrastructure.Workflows.Pipeline.DbConfigDiagnosisAgentResponse")
+            ?? throw new InvalidOperationException("Response type was not found.");
+        var response = Activator.CreateInstance(
+            responseType,
+            "db-config report",
+            "with specific target",
+            new[]
+            {
+                new DbConfigRecommendation(
+                    "innodb_buffer_pool_size",
+                    "set to 4GB",
+                    "medium",
+                    findingType: "cache",
+                    confidence: "medium",
+                    requiresMoreContext: false,
+                    impactSummary: "memory tuning",
+                    evidenceReferences: ["innodb_buffer_pool_size"],
+                    recommendationClass: "tuning",
+                    appliesWhen: "tune to 4GB immediately",
+                    ruleId: "mysql.buffer-pool.reassessment",
+                    ruleVersion: "2026-04-30")
+            },
+            new[]
+            {
+                new DbConfigEvidenceItem(
+                    "collector",
+                    "innodb_buffer_pool_size",
+                    "buffer pool",
+                    Category: "configuration",
+                    RawValue: "256MB",
+                    NormalizedValue: "256MB",
+                    Unit: "bytes-or-engine-unit",
+                    SourceScope: "db",
+                    CapturedAt: null,
+                    ExpiresAt: null,
+                    IsCached: false,
+                    CollectionMethod: "query")
+            },
+            new[]
+            {
+                new DbConfigMissingContextItem("memory_limit_bytes", "missing", "unsupported")
+            },
+            Array.Empty<DbConfigCollectionMetadataItem>(),
+            Array.Empty<string>())
+            ?? throw new InvalidOperationException("Response could not be constructed.");
+
+        var error = await Assert.ThrowsAsync<System.Reflection.TargetInvocationException>(async () =>
+        {
+            method.Invoke(null, [evidence, response]);
+            await Task.CompletedTask;
+        });
+
+        Assert.Contains("specific target values", error.InnerException?.Message ?? error.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

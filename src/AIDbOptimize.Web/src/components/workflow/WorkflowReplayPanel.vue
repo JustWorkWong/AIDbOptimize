@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { WorkflowReplayEvent, WorkflowSessionDetail } from '../../models/workflow'
+import { extractWorkflowStructuredResult } from '../../models/workflow'
 
 defineProps<{
   session: WorkflowSessionDetail | null
@@ -32,6 +33,11 @@ const emit = defineEmits<{
     <p v-else class="state-text">
       SSE status: {{ connected ? 'connected' : 'disconnected' }}
     </p>
+    <div v-if="extractWorkflowStructuredResult(session?.result)" class="review-summary-card compact-list">
+      <strong>{{ extractWorkflowStructuredResult(session?.result)?.title }}</strong>
+      <span>Recommendations: {{ extractWorkflowStructuredResult(session?.result)?.recommendations.length }}</span>
+      <span>Missing context: {{ extractWorkflowStructuredResult(session?.result)?.missingContextItems.length }}</span>
+    </div>
     <p v-if="session && !events.length" class="state-text">
       No events received yet.
     </p>

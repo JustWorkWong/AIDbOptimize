@@ -546,6 +546,7 @@ public sealed class WorkflowApiTests : IClassFixture<WorkflowApiTests.WorkflowAp
                     unit = item.Unit,
                     sourceScope = item.SourceScope,
                     capturedAt = item.CapturedAt,
+                    expiresAt = item.ExpiresAt,
                     isCached = item.IsCached,
                     collectionMethod = item.CollectionMethod
                 }),
@@ -579,7 +580,44 @@ public sealed class WorkflowApiTests : IClassFixture<WorkflowApiTests.WorkflowAp
             await using var dbContext = dbContextFactory.CreateDbContext();
             var tool = await dbContext.McpTools.AsNoTracking().SingleAsync(x => x.Id == request.ToolId, cancellationToken);
             var connectionId = tool.ConnectionId;
-            var responseJson = """{"max_connections":"300","innodb_buffer_pool_size":"512MB","shared_buffers":"256MB","work_mem":"4MB"}""";
+            var connection = await dbContext.McpConnections.AsNoTracking().SingleAsync(x => x.Id == connectionId, cancellationToken);
+            var responseJson = connection.Engine == DatabaseEngine.MySql
+                ? """
+                  {
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "[{\"max_connections\":300,\"innodb_buffer_pool_size\":536870912,\"thread_cache_size\":64,\"tmp_table_size\":16777216,\"max_heap_table_size\":16777216,\"slow_query_log\":0,\"long_query_time\":10,\"performance_schema_enabled\":1,\"threads_connected\":8,\"threads_running\":2,\"slow_queries\":1,\"connections\":120,\"aborted_connects\":0,\"innodb_buffer_pool_reads\":500,\"innodb_buffer_pool_read_requests\":20000,\"created_tmp_disk_tables\":12,\"created_tmp_tables\":40}]"
+                      }
+                    ]
+                  }
+                  """
+                : """
+                  {
+                    "structuredContent": [
+                      {
+                        "shared_buffers": "256MB",
+                        "work_mem": "4MB",
+                        "maintenance_work_mem": "64MB",
+                        "effective_cache_size": "1024MB",
+                        "max_connections": "200",
+                        "checkpoint_timeout": "5min",
+                        "checkpoint_completion_target": "0.5",
+                        "random_page_cost": "4.0",
+                        "seq_page_cost": "1.0",
+                        "track_io_timing": "false",
+                        "shared_preload_libraries": "",
+                        "blks_hit": "1000",
+                        "blks_read": "500",
+                        "temp_files": "42",
+                        "deadlocks": "0",
+                        "checkpoints_timed": "10",
+                        "checkpoints_req": "25",
+                        "pg_stat_statements_enabled": "false"
+                      }
+                    ]
+                  }
+                  """;
             var entity = new McpToolExecutionEntity
             {
                 Id = Guid.NewGuid(),
