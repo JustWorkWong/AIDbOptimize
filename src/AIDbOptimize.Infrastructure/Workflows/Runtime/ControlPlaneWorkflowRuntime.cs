@@ -1399,6 +1399,14 @@ public sealed class ControlPlaneWorkflowRuntime(
             nodeName = execution.NodeKey,
             agentSessionId = session.AgentSessionId
         }, "Diagnosis agent completed.", execution.Id);
+        AppendEvent(dbContext, session.Id, ref nextSequence, WorkflowEventType.AgentReportReady, "agent.report.ready", new
+        {
+            sessionId = session.Id,
+            agentSessionId = session.AgentSessionId,
+            title = ExtractReportTitle(diagnosis.ReportJson),
+            summary = ExtractReportSummary(diagnosis.ReportJson),
+            recommendationCount = ExtractRecommendationCount(diagnosis.ReportJson)
+        }, "智能体结果已生成。", execution.Id);
         await dbContext.SaveChangesAsync(cancellationToken);
 
         return new DiagnosisArtifacts(
@@ -1856,6 +1864,51 @@ public sealed class ControlPlaneWorkflowRuntime(
     {
         using var document = JsonDocument.Parse(string.IsNullOrWhiteSpace(json) ? "{}" : json);
         return document.RootElement.Clone();
+    }
+
+    private static string? ExtractReportTitle(string reportJson)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(reportJson);
+            return document.RootElement.TryGetProperty("title", out var title) && title.ValueKind == JsonValueKind.String
+                ? title.GetString()
+                : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string? ExtractReportSummary(string reportJson)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(reportJson);
+            return document.RootElement.TryGetProperty("summary", out var summary) && summary.ValueKind == JsonValueKind.String
+                ? summary.GetString()
+                : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static int ExtractRecommendationCount(string reportJson)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(reportJson);
+            return document.RootElement.TryGetProperty("recommendations", out var recommendations) && recommendations.ValueKind == JsonValueKind.Array
+                ? recommendations.GetArrayLength()
+                : 0;
+        }
+        catch
+        {
+            return 0;
+        }
     }
 
     private static string ApplyAdjustments(

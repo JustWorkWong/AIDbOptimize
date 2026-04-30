@@ -71,11 +71,11 @@ public sealed class DbConfigDiagnosisAgentExecutor(
         var responseText = response.Text?.Trim();
         if (string.IsNullOrWhiteSpace(responseText))
         {
-            throw new InvalidOperationException("MAF diagnosis agent returned empty text.");
+            throw new InvalidOperationException("MAF 诊断智能体没有返回内容。");
         }
 
         var value = JsonSerializer.Deserialize<DbConfigDiagnosisAgentResponse>(responseText, SerializerOptions)
-            ?? throw new InvalidOperationException("MAF diagnosis agent returned invalid JSON.");
+            ?? throw new InvalidOperationException("MAF 诊断智能体返回的 JSON 无法解析。");
         EnforceNoSpecificTargetValuesWithoutHostContext(evidence, value);
 
         var reportJson = JsonSerializer.Serialize(new
@@ -101,7 +101,7 @@ public sealed class DbConfigDiagnosisAgentExecutor(
     {
         if (!options.IsConfigured)
         {
-            throw new InvalidOperationException("DbConfig diagnosis agent is not configured.");
+            throw new InvalidOperationException("DbConfig 诊断智能体尚未配置。");
         }
 
         var client = new ChatClient(
@@ -176,7 +176,7 @@ JSON 对象必须包含：
             var text = $"{recommendation.Suggestion} {recommendation.AppliesWhen} {recommendation.ImpactSummary}";
             if (ContainsSpecificTargetValue(text))
             {
-                throw new InvalidOperationException("Host context is missing, so the agent must not emit specific target values.");
+                throw new InvalidOperationException("缺少宿主上下文时，智能体不能返回具体目标参数值。");
             }
         }
     }

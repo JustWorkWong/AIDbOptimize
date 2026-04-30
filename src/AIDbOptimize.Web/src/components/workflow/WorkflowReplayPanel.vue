@@ -46,7 +46,7 @@ const emit = defineEmits<{
       <li v-for="item in events" :key="`${item.sequence}-${item.eventName}`" class="replay-item">
         <div class="replay-head">
           <strong>#{{ item.sequence }} {{ item.eventName }}</strong>
-          <span>{{ item.occurredAt || 'n/a' }}</span>
+          <span>{{ item.occurredAt || '无' }}</span>
         </div>
         <p>{{ item.message || item.eventType }}</p>
         <pre>{{ JSON.stringify(item.payload, null, 2) }}</pre>

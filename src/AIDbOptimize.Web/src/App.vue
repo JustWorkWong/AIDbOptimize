@@ -53,23 +53,23 @@ const initStatuses = ref<DataInitializationStatus[]>([])
 
 const resourceLinks = computed<ResourceLink[]>(() => [
   {
-    title: 'API Health',
-    description: 'Check whether the backend API is reachable.',
+    title: 'API 健康检查',
+    description: '检查后端 API 是否可达。',
     href: '/health',
   },
   {
     title: 'Swagger',
-    description: 'Inspect the public HTTP surface.',
+    description: '查看公开的 HTTP 接口。',
     href: '/swagger',
   },
   {
     title: 'pgAdmin',
-    description: 'Open the PostgreSQL management console.',
+    description: '打开 PostgreSQL 管理控制台。',
     href: import.meta.env.VITE_PGADMIN_URL ?? '#',
   },
   {
     title: 'phpMyAdmin',
-    description: 'Open the MySQL management console.',
+    description: '打开 MySQL 管理控制台。',
     href: import.meta.env.VITE_PHPMYADMIN_URL ?? '#',
   },
 ])
@@ -94,12 +94,12 @@ async function loadInfrastructureOverview(): Promise<void> {
   try {
     const response = await fetch('/api/infrastructure')
     if (!response.ok) {
-      throw new Error(`Request failed with status ${response.status}`)
+      throw new Error(`请求失败，状态码：${response.status}`)
     }
 
     overview.value = (await response.json()) as InfrastructureOverview
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : 'Failed to load overview.'
+    errorMessage.value = error instanceof Error ? error.message : '加载总览信息失败。'
   } finally {
     loading.value = false
   }
@@ -124,7 +124,7 @@ async function loadMcpConnections(): Promise<void> {
 
     await loadTools(selectedConnectionId.value)
   } catch (error) {
-    mcpErrorMessage.value = error instanceof Error ? error.message : 'Failed to load MCP connections.'
+    mcpErrorMessage.value = error instanceof Error ? error.message : '加载 MCP 连接失败。'
   } finally {
     mcpLoading.value = false
   }
@@ -137,7 +137,7 @@ async function loadTools(connectionId: string): Promise<void> {
   try {
     tools.value = await getConnectionTools(connectionId)
   } catch (error) {
-    mcpErrorMessage.value = error instanceof Error ? error.message : 'Failed to load MCP tools.'
+    mcpErrorMessage.value = error instanceof Error ? error.message : '加载 MCP 工具失败。'
   } finally {
     toolsLoading.value = false
   }
@@ -152,7 +152,7 @@ async function handleDiscover(connectionId: string): Promise<void> {
     tools.value = await discoverConnectionTools(connectionId)
     mcpConnections.value = await getMcpConnections()
   } catch (error) {
-    mcpErrorMessage.value = error instanceof Error ? error.message : 'Failed to discover MCP tools.'
+    mcpErrorMessage.value = error instanceof Error ? error.message : '获取 MCP 工具失败。'
   } finally {
     toolsLoading.value = false
   }
@@ -174,7 +174,7 @@ async function handleApprovalSave(toolId: string, approvalMode: number): Promise
       tool.approvalMode = approvalMode
     }
   } catch (error) {
-    mcpErrorMessage.value = error instanceof Error ? error.message : 'Failed to save approval mode.'
+    mcpErrorMessage.value = error instanceof Error ? error.message : '保存审批模式失败。'
   } finally {
     savingApprovalToolId.value = ''
   }
@@ -184,7 +184,7 @@ async function loadInitializationStatuses(): Promise<void> {
   try {
     initStatuses.value = await getDataInitializationStatus()
   } catch (error) {
-    mcpErrorMessage.value = error instanceof Error ? error.message : 'Failed to load initialization status.'
+    mcpErrorMessage.value = error instanceof Error ? error.message : '加载初始化状态失败。'
   } finally {
     initStatusesLoading.value = false
   }
@@ -194,16 +194,15 @@ async function loadInitializationStatuses(): Promise<void> {
 <template>
   <main class="page-shell">
     <section class="hero-card">
-      <p class="eyebrow">Aspire Control Plane</p>
+      <p class="eyebrow">Aspire 控制面</p>
       <h1>AIDbOptimize</h1>
       <p class="hero-copy">
-        This workspace combines infrastructure overview, MCP administration, and the
-        database-configuration optimization workflow.
+        这个工作区整合了基础设施总览、MCP 管理，以及数据库配置优化工作流。
       </p>
 
       <div class="hero-stats">
         <div class="hero-stat">
-          <span>Web</span>
+          <span>前端</span>
           <strong>17101</strong>
         </div>
         <div class="hero-stat">
@@ -211,7 +210,7 @@ async function loadInitializationStatuses(): Promise<void> {
           <strong>17100</strong>
         </div>
         <div class="hero-stat">
-          <span>Configured services</span>
+          <span>已配置服务</span>
           <strong>{{ injectedServiceCount }}/4</strong>
         </div>
       </div>
@@ -224,7 +223,7 @@ async function loadInitializationStatuses(): Promise<void> {
           :class="{ active: activeView === 'overview' }"
           @click="activeView = 'overview'"
         >
-          Overview
+          总览
         </button>
         <button
           type="button"
@@ -238,7 +237,7 @@ async function loadInitializationStatuses(): Promise<void> {
           :class="{ active: activeView === 'workflow' }"
           @click="activeView = 'workflow'"
         >
-          Workflow
+          工作流
         </button>
       </div>
     </section>
@@ -246,7 +245,7 @@ async function loadInitializationStatuses(): Promise<void> {
     <template v-if="activeView === 'overview'">
       <section class="panel-grid">
         <article class="panel">
-          <h2>Quick links</h2>
+          <h2>快捷链接</h2>
           <div class="link-grid">
             <a
               v-for="link in resourceLinks"
@@ -263,12 +262,12 @@ async function loadInitializationStatuses(): Promise<void> {
         </article>
 
         <article class="panel">
-          <h2>Connection status</h2>
-          <p v-if="loading" class="state-text">Loading infrastructure overview...</p>
+          <h2>连接状态</h2>
+          <p v-if="loading" class="state-text">正在加载基础设施总览……</p>
           <p v-else-if="errorMessage" class="state-text error">{{ errorMessage }}</p>
           <template v-else-if="overview">
             <p class="state-text">
-              Environment: <strong>{{ overview.environmentName }}</strong>
+              环境：<strong>{{ overview.environmentName }}</strong>
             </p>
 
             <ul class="status-list">
@@ -283,7 +282,7 @@ async function loadInitializationStatuses(): Promise<void> {
                 </div>
                 <div class="status-meta">
                   <em :class="service.isConfigured ? 'ok' : 'fail'">
-                    {{ service.isConfigured ? 'configured' : 'missing' }}
+                    {{ service.isConfigured ? '已配置' : '缺失' }}
                   </em>
                   <code>{{ service.preview }}</code>
                 </div>

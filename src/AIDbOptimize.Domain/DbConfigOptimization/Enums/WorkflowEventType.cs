@@ -15,5 +15,6 @@ public enum WorkflowEventType
     WorkflowCompleted = 7,
     WorkflowFailed = 8,
     WorkflowCancelled = 9,
-    WorkflowRecovered = 10
+    WorkflowRecovered = 10,
+    AgentReportReady = 11
 }

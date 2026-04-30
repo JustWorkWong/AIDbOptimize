@@ -35,7 +35,7 @@ const observabilityItems = computed(() =>
   parsedReport.value?.evidenceItems.filter(item => item.category === 'observability').slice(0, 8) ?? [])
 
 function displayValue(item: WorkflowEvidenceItem): string {
-  return item.normalizedValue || item.rawValue || 'n/a'
+  return item.normalizedValue || item.rawValue || '无'
 }
 
 function metadataValue(name: string): WorkflowCollectionMetadata | undefined {

@@ -236,6 +236,7 @@ export const knownWorkflowEventNames = [
   'checkpoint.saved',
   'review.requested',
   'review.resolved',
+  'agent.report.ready',
   'workflow.completed',
   'workflow.failed',
   'workflow.cancelled',
