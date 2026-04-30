@@ -69,6 +69,7 @@ export interface WorkflowEvidenceItem {
   unit: string | null
   sourceScope: string
   capturedAt: string | null
+  expiresAt: string | null
   isCached: boolean
   collectionMethod: string | null
 }

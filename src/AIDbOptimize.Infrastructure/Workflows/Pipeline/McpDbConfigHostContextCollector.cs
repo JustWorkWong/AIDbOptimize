@@ -1,5 +1,6 @@
 using System.Data.Common;
 using System.Text.Json;
+using System.Collections.Concurrent;
 using AIDbOptimize.Application.Abstractions.Mcp;
 using AIDbOptimize.Application.Abstractions.Persistence;
 using AIDbOptimize.Domain.DbConfigOptimization.Models;
@@ -16,6 +17,8 @@ public sealed class McpDbConfigHostContextCollector(
     IMcpToolExecutionService toolExecutionService) : IDbConfigHostContextCollector
 {
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
+    private static readonly ConcurrentDictionary<string, CachedHostToolResult> Cache = new(StringComparer.Ordinal);
+    private static readonly TimeSpan StaticCacheTtl = TimeSpan.FromMinutes(5);
     private static readonly string[] RequiredHostKeys =
     [
         "memory_limit_bytes",
@@ -123,7 +126,7 @@ public sealed class McpDbConfigHostContextCollector(
             }
 
             var payload = ParseToolPayload(toolResult.ResponsePayloadJson);
-            AddItems(items, payload, resourceScope, invocation.Tool.ToolName);
+            AddItems(items, payload, resourceScope, invocation.Tool.ToolName, toolResult.IsCached, toolResult.CapturedAt, toolResult.ExpiresAt);
         }
 
         var classifiedMissingReason = ClassifyMissingReason(warnings);
@@ -189,7 +192,7 @@ public sealed class McpDbConfigHostContextCollector(
         return best;
     }
 
-    private async Task<McpToolExecutionResult?> ExecuteToolAsync(
+    private async Task<HostToolExecutionResult?> ExecuteToolAsync(
         McpToolRecord tool,
         object payload,
         Guid? workflowSessionId,
@@ -198,8 +201,24 @@ public sealed class McpDbConfigHostContextCollector(
         string? traceId,
         CancellationToken cancellationToken)
     {
+        var cacheKey = BuildCacheKey(tool, payload);
+        if (IsStaticCacheable(tool.ToolName) &&
+            Cache.TryGetValue(cacheKey, out var cached) &&
+            cached.ExpiresAt > DateTimeOffset.UtcNow)
+        {
+            return new HostToolExecutionResult(
+                new McpToolExecutionResult(
+                    Guid.Empty,
+                    "Succeeded",
+                    cached.ResponsePayloadJson,
+                    null),
+                true,
+                cached.CapturedAt,
+                cached.ExpiresAt);
+        }
+
         using var document = JsonDocument.Parse(JsonSerializer.Serialize(payload, SerializerOptions));
-        return await toolExecutionService.ExecuteAsync(
+        var result = await toolExecutionService.ExecuteAsync(
             new McpToolExecutionRequest(
                 tool.Id,
                 document.RootElement.Clone(),
@@ -209,6 +228,19 @@ public sealed class McpDbConfigHostContextCollector(
                 workflowSessionId.HasValue ? "workflow" : "manual",
                 traceId),
             cancellationToken);
+
+        var expiresAt = IsStaticCacheable(tool.ToolName)
+            ? DateTimeOffset.UtcNow.Add(StaticCacheTtl)
+            : (DateTimeOffset?)null;
+        var capturedAt = DateTimeOffset.UtcNow;
+
+        if (expiresAt.HasValue &&
+            string.Equals(result.Status, "Succeeded", StringComparison.OrdinalIgnoreCase))
+        {
+            Cache[cacheKey] = new CachedHostToolResult(result.ResponsePayloadJson, capturedAt, expiresAt.Value);
+        }
+
+        return new HostToolExecutionResult(result, false, capturedAt, expiresAt);
     }
 
     private static IReadOnlyList<HostToolInvocation> SelectToolInvocations(
@@ -245,7 +277,7 @@ public sealed class McpDbConfigHostContextCollector(
         var tool = toolset.Tools.FirstOrDefault(candidate => string.Equals(candidate.ToolName, toolName, StringComparison.OrdinalIgnoreCase));
         if (tool is not null)
         {
-            invocations.Add(new HostToolInvocation(tool, payload));
+            invocations.Add(new HostToolInvocation(tool, payload, IsStaticCacheable(tool.ToolName)));
         }
     }
 
@@ -253,14 +285,17 @@ public sealed class McpDbConfigHostContextCollector(
         List<DbConfigEvidenceItem> items,
         JsonElement payload,
         string resourceScope,
-        string collectionMethod)
+        string collectionMethod,
+        bool isCached,
+        DateTimeOffset? capturedAt,
+        DateTimeOffset? expiresAt)
     {
         if (payload.ValueKind != JsonValueKind.Object)
         {
             return;
         }
 
-        var capturedAt = DateTimeOffset.UtcNow;
+        var observedAt = capturedAt ?? DateTimeOffset.UtcNow;
         foreach (var property in payload.EnumerateObject())
         {
             if (property.Value.ValueKind is JsonValueKind.Object or JsonValueKind.Array)
@@ -291,8 +326,9 @@ public sealed class McpDbConfigHostContextCollector(
                 NormalizedValue: normalized,
                 Unit: InferUnit(property.Name),
                 SourceScope: resourceScope,
-                CapturedAt: capturedAt,
-                IsCached: false,
+                CapturedAt: observedAt,
+                ExpiresAt: expiresAt,
+                IsCached: isCached,
                 CollectionMethod: collectionMethod));
         }
     }
@@ -488,6 +524,19 @@ public sealed class McpDbConfigHostContextCollector(
         return "unsupported";
     }
 
+    private static bool IsStaticCacheable(string toolName)
+    {
+        return string.Equals(toolName, "get_container_limits", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(toolName, "get_host_memory", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(toolName, "get_host_cpu", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(toolName, "get_managed_service_profile", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string BuildCacheKey(McpToolRecord tool, object payload)
+    {
+        return $"{tool.Id:N}:{JsonSerializer.Serialize(payload, SerializerOptions)}";
+    }
+
     private static readonly HashSet<string> HostToolNames = new(StringComparer.OrdinalIgnoreCase)
     {
         "resolve_runtime_target",
@@ -508,5 +557,24 @@ public sealed class McpDbConfigHostContextCollector(
 
     private sealed record HostToolInvocation(
         McpToolRecord Tool,
-        object Payload);
+        object Payload,
+        bool IsStaticCacheable);
+
+    private sealed record CachedHostToolResult(
+        string ResponsePayloadJson,
+        DateTimeOffset CapturedAt,
+        DateTimeOffset ExpiresAt);
+
+    private sealed record HostToolExecutionResult(
+        McpToolExecutionResult Execution,
+        bool IsCached,
+        DateTimeOffset? CapturedAt,
+        DateTimeOffset? ExpiresAt)
+    {
+        public string Status => Execution.Status;
+
+        public string ResponsePayloadJson => Execution.ResponsePayloadJson;
+
+        public string? ErrorMessage => Execution.ErrorMessage;
+    }
 }

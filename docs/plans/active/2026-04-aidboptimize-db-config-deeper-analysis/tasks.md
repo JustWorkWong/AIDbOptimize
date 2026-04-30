@@ -18,8 +18,8 @@
 
 ## 阶段 2：采集增强
 
-- [ ] 扩展 `DbConfigSnapshotCollectorExecutor` 支持更多 MySQL 配置项
-- [ ] 扩展 `DbConfigSnapshotCollectorExecutor` 支持更多 PostgreSQL 配置项
+- [x] 扩展 `DbConfigSnapshotCollectorExecutor` 支持更多 MySQL 配置项
+- [x] 扩展 `DbConfigSnapshotCollectorExecutor` 支持更多 PostgreSQL 配置项
 - [x] 支持 runtime metrics 采集
 - [x] 支持 observability snapshot 采集
 - [x] 支持 host context 采集
@@ -27,17 +27,17 @@
 - [x] 新增 `resolve_runtime_target`，解决连接到容器/主机/托管实例的映射
 - [x] 明确容器资源边界优先于宿主总量的采集优先级
 - [x] 支持 `content[].text / structuredContent / JSON object` 多返回形态统一解析
-- [ ] 对表格类结果做 TopN 摘要而不是原样全文入库
-- [ ] 为 host context 采集增加 `capturedAt / expiresAt / isCached`
+- [x] 对表格类结果做 TopN 摘要而不是原样全文入库
+- [x] 为 host context 采集增加 `capturedAt / expiresAt / isCached`
 - [x] 对 host context 采集失败输出结构化缺失原因：`permission / timeout / unsupported / unresolved-target`
 
 验收：
-- [ ] MySQL 能采到 `max_connections / innodb_buffer_pool_size / thread / slow-query` 相关值
-- [ ] PostgreSQL 能采到 `shared_buffers / work_mem / checkpoint / cache-hit` 相关值
+- [x] MySQL 能采到 `max_connections / innodb_buffer_pool_size / thread / slow-query` 相关值
+- [x] PostgreSQL 能采到 `shared_buffers / work_mem / checkpoint / cache-hit` 相关值
 - [x] 缺失上下文时以结构化缺失项进入 evidence
 - [x] 宿主上下文字段能稳定输出 `resource_scope / memory_limit / memory_available / cpu_limit / disk_available`
 - [x] 至少一条容器场景被验证
-- [ ] 至少一条托管/不可见场景被验证
+- [x] 至少一条托管/不可见场景被验证
 
 ## 阶段 3：规则引擎增强
 

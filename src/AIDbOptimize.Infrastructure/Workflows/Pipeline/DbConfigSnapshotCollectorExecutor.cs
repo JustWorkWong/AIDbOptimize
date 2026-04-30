@@ -59,6 +59,7 @@ public sealed class DbConfigSnapshotCollectorExecutor(
             }
 
             var values = ExtractValues(connection, selectedTool.ToolName, result.ResponsePayloadJson);
+            var extractionMetadata = ExtractCollectionMetadata(selectedTool.ToolName, result.ResponsePayloadJson);
             var hostContext = hostContextCollector is null
                 ? BuildUnavailableHostContext("No host-context collector is configured.")
                 : await hostContextCollector.CollectAsync(
@@ -74,7 +75,8 @@ public sealed class DbConfigSnapshotCollectorExecutor(
                 values,
                 Array.Empty<string>(),
                 hostContext,
-                selectedTool.ToolName);
+                selectedTool.ToolName,
+                extractionMetadata);
         }
         catch (Exception ex)
         {
@@ -163,7 +165,8 @@ public sealed class DbConfigSnapshotCollectorExecutor(
         IReadOnlyDictionary<string, string> values,
         IReadOnlyList<string> warnings,
         DbConfigHostContextCollectionResult hostContext,
-        string collectionMethod)
+        string collectionMethod,
+        IReadOnlyList<DbConfigCollectionMetadataItem>? extractionMetadata = null)
     {
         var capturedAt = DateTimeOffset.UtcNow;
         var configurationItems = new List<DbConfigEvidenceItem>();
@@ -189,6 +192,7 @@ public sealed class DbConfigSnapshotCollectorExecutor(
                     InferUnit(pair.Key),
                     "db",
                     capturedAt,
+                    null,
                     false,
                     collectionMethod);
 
@@ -212,6 +216,10 @@ public sealed class DbConfigSnapshotCollectorExecutor(
             new("source", source, "Snapshot source label."),
             new("collection_method", collectionMethod, "Primary read-only collection method.")
         };
+        if (extractionMetadata is not null)
+        {
+            metadata.AddRange(extractionMetadata);
+        }
         metadata.AddRange(hostContext.CollectionMetadata);
 
         return new DbConfigSnapshot(
@@ -280,6 +288,31 @@ public sealed class DbConfigSnapshotCollectorExecutor(
         return values;
     }
 
+    private static IReadOnlyList<DbConfigCollectionMetadataItem> ExtractCollectionMetadata(
+        string toolName,
+        string responsePayloadJson)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(responsePayloadJson);
+            if (TryExtractTableSummary(document.RootElement, out var summary))
+            {
+                return
+                [
+                    new DbConfigCollectionMetadataItem("topn_source_tool", toolName, "Tool that produced the summarized tabular result."),
+                    new DbConfigCollectionMetadataItem("topn_row_count", summary.RowCount.ToString(), "Total row count observed in the source result."),
+                    new DbConfigCollectionMetadataItem("topn_summary_json", summary.SummaryJson, "TopN summary for tabular tool output.")
+                ];
+            }
+        }
+        catch
+        {
+            // ignore malformed payloads and continue without metadata
+        }
+
+        return [];
+    }
+
     private static bool TryExtractStructuredValues(
         JsonElement root,
         IDictionary<string, string> values)
@@ -332,6 +365,63 @@ public sealed class DbConfigSnapshotCollectorExecutor(
         }
 
         return false;
+    }
+
+    private static bool TryExtractTableSummary(JsonElement root, out DbConfigTableSummary summary)
+    {
+        if (root.ValueKind == JsonValueKind.Object && root.TryGetProperty("structuredContent", out var structuredContent))
+        {
+            return TryBuildTableSummary(structuredContent, out summary);
+        }
+
+        if (root.ValueKind == JsonValueKind.Object &&
+            root.TryGetProperty("content", out var content) &&
+            content.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in content.EnumerateArray())
+            {
+                if (item.ValueKind != JsonValueKind.Object ||
+                    !item.TryGetProperty("text", out var textElement) ||
+                    textElement.ValueKind != JsonValueKind.String)
+                {
+                    continue;
+                }
+
+                try
+                {
+                    using var nested = JsonDocument.Parse(textElement.GetString() ?? "[]");
+                    if (TryBuildTableSummary(nested.RootElement, out summary))
+                    {
+                        return true;
+                    }
+                }
+                catch
+                {
+                    // ignore invalid nested json
+                }
+            }
+        }
+
+        summary = default;
+        return false;
+    }
+
+    private static bool TryBuildTableSummary(JsonElement root, out DbConfigTableSummary summary)
+    {
+        if (root.ValueKind != JsonValueKind.Array || root.GetArrayLength() <= 1)
+        {
+            summary = default;
+            return false;
+        }
+
+        var top = root.EnumerateArray()
+            .Take(3)
+            .Select(static item => item.Clone())
+            .ToArray();
+        summary = new DbConfigTableSummary(
+            root.GetArrayLength(),
+            JsonSerializer.Serialize(top));
+        return true;
     }
 
     private static bool TryExtractNestedObjectValues(JsonElement root, IDictionary<string, string> values)
@@ -514,4 +604,8 @@ public sealed class DbConfigSnapshotCollectorExecutor(
         "track_io_timing",
         "shared_preload_libraries"
     };
+
+    private readonly record struct DbConfigTableSummary(
+        int RowCount,
+        string SummaryJson);
 }

@@ -29,7 +29,7 @@ public sealed class DbConfigCollectorTests
                 false,
                 DateTimeOffset.UtcNow,
                 DateTimeOffset.UtcNow));
-        var executionService = new FakeExecutionService("""{"max_connections":"300","innodb_buffer_pool_size":"512MB","threads_connected":"12","performance_schema_enabled":"true"}""");
+        var executionService = new FakeExecutionService("""{"max_connections":"300","innodb_buffer_pool_size":"512MB","thread_cache_size":"64","slow_query_log":"ON","threads_connected":"12","performance_schema_enabled":"true"}""");
         var collector = new DbConfigSnapshotCollectorExecutor(toolRepository, executionService, []);
 
         var snapshot = await collector.CollectAsync(new McpConnectionEntity
@@ -44,6 +44,8 @@ public sealed class DbConfigCollectorTests
         Assert.Equal("300", snapshot.CollectedValues["max_connections"]);
         Assert.Empty(snapshot.Warnings);
         Assert.Contains(snapshot.ConfigurationItems, item => item.Reference == "max_connections");
+        Assert.Contains(snapshot.ConfigurationItems, item => item.Reference == "thread_cache_size");
+        Assert.Contains(snapshot.ConfigurationItems, item => item.Reference == "slow_query_log");
         Assert.Contains(snapshot.RuntimeMetricItems, item => item.Reference == "threads_connected");
         Assert.Contains(snapshot.ObservabilityItems, item => item.Reference == "performance_schema_enabled");
         Assert.NotEmpty(snapshot.MissingContextItems);
@@ -91,6 +93,7 @@ public sealed class DbConfigCollectorTests
             {
               "shared_buffers": "256MB",
               "work_mem": "4MB",
+              "checkpoint_timeout": "5min",
               "blks_hit": "1000",
               "pg_stat_statements_enabled": "false"
             }
@@ -110,8 +113,50 @@ public sealed class DbConfigCollectorTests
 
         Assert.Equal("256MB", snapshot.CollectedValues["shared_buffers"]);
         Assert.Contains(snapshot.ConfigurationItems, item => item.Reference == "shared_buffers");
+        Assert.Contains(snapshot.ConfigurationItems, item => item.Reference == "checkpoint_timeout");
         Assert.Contains(snapshot.RuntimeMetricItems, item => item.Reference == "blks_hit");
         Assert.Contains(snapshot.ObservabilityItems, item => item.Reference == "pg_stat_statements_enabled");
+    }
+
+    [Fact]
+    public async Task CollectAsync_AddsTopNSummaryMetadata_ForTabularResults()
+    {
+        var toolRepository = new FakeToolRepository(
+            new McpToolRecord(
+                Guid.NewGuid(),
+                Guid.Parse("33333333-3333-3333-3333-333333333333"),
+                "query",
+                "query",
+                "只读查询",
+                "{}",
+                ToolApprovalMode.NoApproval,
+                true,
+                false,
+                DateTimeOffset.UtcNow,
+                DateTimeOffset.UtcNow));
+        var responseJson = """
+        {
+          "structuredContent": [
+            { "shared_buffers": "256MB", "work_mem": "4MB", "blks_hit": "1000" },
+            { "shared_buffers": "256MB", "work_mem": "4MB", "blks_hit": "900" },
+            { "shared_buffers": "256MB", "work_mem": "4MB", "blks_hit": "800" },
+            { "shared_buffers": "256MB", "work_mem": "4MB", "blks_hit": "700" }
+          ]
+        }
+        """;
+        var executionService = new FakeExecutionService(responseJson);
+        var collector = new DbConfigSnapshotCollectorExecutor(toolRepository, executionService, []);
+
+        var snapshot = await collector.CollectAsync(new McpConnectionEntity
+        {
+            Id = Guid.Parse("33333333-3333-3333-3333-333333333333"),
+            Engine = DatabaseEngine.PostgreSql,
+            DisplayName = "postgres-main",
+            DatabaseName = "appdb"
+        });
+
+        Assert.Contains(snapshot.CollectionMetadata, item => item.Name == "topn_row_count" && item.Value == "4");
+        Assert.Contains(snapshot.CollectionMetadata, item => item.Name == "topn_summary_json");
     }
 
     [Fact]

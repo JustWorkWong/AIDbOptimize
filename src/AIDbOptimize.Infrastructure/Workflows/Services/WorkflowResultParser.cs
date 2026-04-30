@@ -80,6 +80,7 @@ internal static class WorkflowResultParser
                 GetString(item, "unit"),
                 GetString(item, "sourceScope") ?? "db",
                 GetDateTimeOffset(item, "capturedAt"),
+                GetDateTimeOffset(item, "expiresAt"),
                 GetBoolean(item, "isCached"),
                 GetString(item, "collectionMethod")))
             .ToArray();

@@ -72,6 +72,7 @@ public sealed record WorkflowEvidenceItemDto(
     string? Unit,
     string SourceScope,
     DateTimeOffset? CapturedAt,
+    DateTimeOffset? ExpiresAt,
     bool IsCached,
     string? CollectionMethod);
 
