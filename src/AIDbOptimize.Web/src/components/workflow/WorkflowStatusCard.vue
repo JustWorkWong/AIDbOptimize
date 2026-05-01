@@ -1,14 +1,34 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import type { WorkflowSessionDetail } from '../../models/workflow'
 
-defineProps<{
+const props = defineProps<{
   session: WorkflowSessionDetail | null
 }>()
+
+const emit = defineEmits<{
+  cancel: []
+}>()
+
+const canCancel = computed(() => {
+  return props.session !== null
+    && !['Completed', 'Cancelled', 'Failed'].includes(props.session.status)
+})
 </script>
 
 <template>
   <article class="panel">
-    <h2>状态</h2>
+    <div class="panel-header">
+      <h2>状态</h2>
+      <button
+        v-if="canCancel"
+        type="button"
+        class="secondary"
+        @click="emit('cancel')"
+      >
+        取消工作流
+      </button>
+    </div>
     <p v-if="!session" class="state-text">
       请选择一个工作流会话以查看最新状态。
     </p>

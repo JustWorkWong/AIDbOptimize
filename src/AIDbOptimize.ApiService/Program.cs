@@ -1,6 +1,7 @@
 using System.Reflection;
 using System.Text.RegularExpressions;
 using AIDbOptimize.ApiService.Api;
+using AIDbOptimize.ApiService.Configuration;
 using AIDbOptimize.ApiService.DatabaseMigrations;
 using AIDbOptimize.Application.Abstractions.Agents;
 using AIDbOptimize.Application.Abstractions.Mcp;
@@ -23,6 +24,7 @@ using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Configuration.AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: true);
 
 // 这个最小 API 当前主要承担三类职责：
 // 1. 公开健康检查与基础设施状态；
@@ -33,7 +35,11 @@ var controlPlaneConnectionString = ResolveConnectionString(
     "aidbopt-control",
     "ControlPlane",
     "Host=localhost;Port=15432;Username=postgres;Password=Postgres123!;Database=aidbopt_control");
-builder.Configuration.AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: true);
+controlPlaneConnectionString = ControlPlaneConnectionStringResolver.Resolve(
+    builder.Configuration,
+    "aidbopt-control",
+    "ControlPlane",
+    controlPlaneConnectionString);
 var serviceName = builder.Environment.ApplicationName;
 var serviceVersion = ResolveServiceVersion();
 var diagnosisAgentOptions = builder.Configuration
@@ -117,8 +123,8 @@ builder.Services.AddScoped<IDbConfigDiagnosisAgentExecutor, DbConfigDiagnosisAge
 builder.Services.AddScoped<RecommendationSchemaValidator>();
 builder.Services.AddScoped<DbConfigGroundingExecutor>();
 builder.Services.AddScoped<ReviewAdjustmentValidator>();
-builder.Services.AddScoped<DbConfigHumanReviewGateExecutor>();
 builder.Services.AddScoped<IWorkflowRuntime, ControlPlaneWorkflowRuntime>();
+builder.Services.AddSingleton<IWorkflowExecutionRegistry, WorkflowExecutionRegistry>();
 builder.Services.AddScoped<IMcpDiscoveryService, McpDiscoveryService>();
 builder.Services.AddScoped<IMcpToolExecutionService, McpToolExecutionService>();
 builder.Services.AddScoped<McpDiscoveryAppService>();
@@ -230,17 +236,6 @@ static string MaskConnectionString(string? value)
     return masked;
 }
 
-static string ResolveConnectionString(
-    IConfiguration configuration,
-    string aspireName,
-    string fallbackName,
-    string defaultValue)
-{
-    return configuration.GetConnectionString(aspireName)
-        ?? configuration.GetConnectionString(fallbackName)
-        ?? defaultValue;
-}
-
 static string ResolveServiceVersion()
 {
     var assembly = typeof(Program).Assembly;
@@ -251,6 +246,19 @@ static string ResolveServiceVersion()
     return informationalVersion?.Split('+')[0]
         ?? assembly.GetName().Version?.ToString()
         ?? "1.0.0";
+}
+
+static string ResolveConnectionString(
+    IConfiguration configuration,
+    string aspireName,
+    string fallbackName,
+    string defaultValue)
+{
+    return ControlPlaneConnectionStringResolver.Resolve(
+        configuration,
+        aspireName,
+        fallbackName,
+        defaultValue);
 }
 
 internal sealed record InfrastructureOverviewResponse(

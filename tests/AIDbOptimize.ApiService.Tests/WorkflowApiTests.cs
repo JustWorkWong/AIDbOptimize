@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Threading;
 using AIDbOptimize.Application.Abstractions.Mcp;
 using AIDbOptimize.Domain.DbConfigOptimization.Models;
 using AIDbOptimize.Domain.Mcp.Enums;
@@ -427,9 +428,135 @@ public sealed class WorkflowApiTests : IClassFixture<WorkflowApiTests.WorkflowAp
         Assert.NotNull(sessionAfter.ActiveReviewTaskId);
     }
 
+    [Fact]
+    public async Task CancelWorkflow_WhileRunning_RemainsCancelled()
+    {
+        var connectionId = await _factory.SeedConnectionAsync("cancel-running", DatabaseEngine.PostgreSql);
+        _factory.SetToolExecutionDelay(TimeSpan.FromSeconds(2));
+        using var client = _factory.CreateClient();
+
+        var startResponse = await client.PostAsJsonAsync("/api/workflows/db-config-optimization", new
+        {
+            connectionId = connectionId.ToString(),
+            options = new
+            {
+                requireHumanReview = false,
+                allowFallbackSnapshot = true,
+                enableEvidenceGrounding = true
+            },
+            requestedBy = "frontend",
+            notes = "cancel-running"
+        });
+
+        startResponse.EnsureSuccessStatusCode();
+        using var startJson = JsonDocument.Parse(await startResponse.Content.ReadAsStringAsync());
+        var workflowId = startJson.RootElement.GetProperty("sessionId").GetString();
+        Assert.True(Guid.TryParse(workflowId, out var sessionId));
+
+        var cancelResponse = await client.PostAsync($"/api/workflows/{workflowId}/cancel", content: null);
+        cancelResponse.EnsureSuccessStatusCode();
+
+        await WaitForWorkflowStatusAsync(client, workflowId!, expectedStatuses: ["Cancelled"], timeoutSeconds: 30);
+        await Task.Delay(2500);
+
+        var detailResponse = await client.GetAsync($"/api/workflows/{workflowId}");
+        detailResponse.EnsureSuccessStatusCode();
+        using var detailJson = JsonDocument.Parse(await detailResponse.Content.ReadAsStringAsync());
+        Assert.Equal("Cancelled", detailJson.RootElement.GetProperty("status").GetString());
+
+        await using var dbContext = _factory.CreateControlPlaneDbContext();
+        var session = await dbContext.WorkflowSessions.SingleAsync(x => x.Id == sessionId);
+        Assert.Equal(Domain.DbConfigOptimization.Enums.WorkflowSessionStatus.Cancelled, session.Status);
+    }
+
+    [Fact]
+    public async Task CancelWorkflow_WhileWaitingForReview_ClosesTask_AndRejectsLaterSubmission()
+    {
+        var connectionId = await _factory.SeedConnectionAsync("cancel-review", DatabaseEngine.MySql);
+        using var client = _factory.CreateClient();
+
+        var startResponse = await client.PostAsJsonAsync("/api/workflows/db-config-optimization", new
+        {
+            connectionId = connectionId.ToString(),
+            options = new
+            {
+                requireHumanReview = true,
+                allowFallbackSnapshot = true,
+                enableEvidenceGrounding = true
+            },
+            requestedBy = "frontend",
+            notes = "cancel-review"
+        });
+
+        startResponse.EnsureSuccessStatusCode();
+        using var startJson = JsonDocument.Parse(await startResponse.Content.ReadAsStringAsync());
+        var workflowId = startJson.RootElement.GetProperty("sessionId").GetString();
+        Assert.True(Guid.TryParse(workflowId, out var sessionId));
+
+        var taskId = await WaitForReviewTaskAsync(client, workflowId!, 60);
+        await WaitForWorkflowStatusAsync(client, workflowId!, expectedStatuses: ["WaitingForReview"], timeoutSeconds: 60);
+
+        var cancelResponse = await client.PostAsync($"/api/workflows/{workflowId}/cancel", content: null);
+        cancelResponse.EnsureSuccessStatusCode();
+
+        await WaitForWorkflowStatusAsync(client, workflowId!, expectedStatuses: ["Cancelled"], timeoutSeconds: 30);
+
+        var reviewResponse = await client.GetAsync($"/api/reviews/{taskId}");
+        reviewResponse.EnsureSuccessStatusCode();
+        using var reviewJson = JsonDocument.Parse(await reviewResponse.Content.ReadAsStringAsync());
+        Assert.Equal("Cancelled", reviewJson.RootElement.GetProperty("status").GetString());
+
+        await using (var dbContext = _factory.CreateControlPlaneDbContext())
+        {
+            var session = await dbContext.WorkflowSessions.SingleAsync(x => x.Id == sessionId);
+            Assert.Null(session.ActiveReviewTaskId);
+        }
+
+        var submitResponse = await client.PostAsJsonAsync($"/api/reviews/{taskId}/submit", new
+        {
+            action = "approve",
+            reviewer = "late-reviewer",
+            comment = "too late"
+        });
+
+        Assert.Equal(HttpStatusCode.Conflict, submitResponse.StatusCode);
+    }
+
+    [Fact]
+    public async Task Recovery_OnRunningSession_WithoutCheckpointRef_RestartsQueuedStart()
+    {
+        var connectionId = await _factory.SeedConnectionAsync("recovery-no-checkpoint", DatabaseEngine.MySql);
+        var runtime = _factory.Services.GetRequiredService<Infrastructure.Workflows.Runtime.IWorkflowRuntime>();
+        var queued = await runtime.QueueStartDbConfigAsync(
+            new Infrastructure.Workflows.Runtime.DbConfigWorkflowCommand(
+                connectionId,
+                "tester",
+                "queued-recovery",
+                true,
+                true,
+                true),
+            CancellationToken.None);
+
+        Assert.True(Guid.TryParse(queued.SessionId, out var sessionId));
+
+        var result = await runtime.ResumeAsync(
+            sessionId,
+            new Infrastructure.Workflows.Runtime.WorkflowResumeRequest("recovery"),
+            CancellationToken.None);
+
+        Assert.Equal("WaitingForReview", result.Status);
+
+        await using var dbContext = _factory.CreateControlPlaneDbContext();
+        var session = await dbContext.WorkflowSessions.SingleAsync(x => x.Id == sessionId);
+        Assert.Equal(Domain.DbConfigOptimization.Enums.WorkflowSessionStatus.WaitingForReview, session.Status);
+        Assert.NotNull(session.ActiveReviewTaskId);
+        Assert.False(string.IsNullOrWhiteSpace(session.EngineCheckpointRef));
+    }
+
     public sealed class WorkflowApiFactory : WebApplicationFactory<Program>
     {
         private readonly TestControlPlaneDbContextFactory _dbContextFactory = new();
+        private readonly WorkflowTestBehavior _behavior = new();
 
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
@@ -444,12 +571,13 @@ public sealed class WorkflowApiTests : IClassFixture<WorkflowApiTests.WorkflowAp
                 services.RemoveAll<IDbConfigDiagnosisAgentExecutor>();
                 services.AddSingleton<IDbConfigDiagnosisAgentExecutor>(new FakeDiagnosisAgentExecutor());
                 services.RemoveAll<IMcpToolExecutionService>();
-                services.AddSingleton<IMcpToolExecutionService>(new FakeWorkflowToolExecutionService(_dbContextFactory));
+                services.AddSingleton<IMcpToolExecutionService>(new FakeWorkflowToolExecutionService(_dbContextFactory, _behavior));
             });
         }
 
         public async Task<Guid> SeedConnectionAsync(string name, DatabaseEngine engine)
         {
+            _behavior.ToolExecutionDelay = TimeSpan.Zero;
             await using var dbContext = _dbContextFactory.CreateDbContext();
             var connection = new McpConnectionEntity
             {
@@ -491,6 +619,11 @@ public sealed class WorkflowApiTests : IClassFixture<WorkflowApiTests.WorkflowAp
         public ControlPlaneDbContext CreateControlPlaneDbContext()
         {
             return _dbContextFactory.CreateDbContext();
+        }
+
+        public void SetToolExecutionDelay(TimeSpan delay)
+        {
+            _behavior.ToolExecutionDelay = delay;
         }
     }
 
@@ -564,10 +697,15 @@ public sealed class WorkflowApiTests : IClassFixture<WorkflowApiTests.WorkflowAp
         }
     }
 
-    private sealed class FakeWorkflowToolExecutionService(TestControlPlaneDbContextFactory dbContextFactory) : IMcpToolExecutionService
+    private sealed class FakeWorkflowToolExecutionService(TestControlPlaneDbContextFactory dbContextFactory, WorkflowTestBehavior behavior) : IMcpToolExecutionService
     {
         public async Task<McpToolExecutionResult> ExecuteAsync(McpToolExecutionRequest request, CancellationToken cancellationToken = default)
         {
+            if (behavior.ToolExecutionDelay > TimeSpan.Zero)
+            {
+                await Task.Delay(behavior.ToolExecutionDelay, cancellationToken);
+            }
+
             await using var dbContext = dbContextFactory.CreateDbContext();
             var tool = await dbContext.McpTools.AsNoTracking().SingleAsync(x => x.Id == request.ToolId, cancellationToken);
             var connectionId = tool.ConnectionId;
@@ -629,6 +767,11 @@ public sealed class WorkflowApiTests : IClassFixture<WorkflowApiTests.WorkflowAp
 
             return new McpToolExecutionResult(entity.Id, entity.Status, entity.ResponsePayloadJson, null);
         }
+    }
+
+    private sealed class WorkflowTestBehavior
+    {
+        public TimeSpan ToolExecutionDelay { get; set; } = TimeSpan.Zero;
     }
 
     private sealed class TestControlPlaneDbContextFactory : IDbContextFactory<ControlPlaneDbContext>

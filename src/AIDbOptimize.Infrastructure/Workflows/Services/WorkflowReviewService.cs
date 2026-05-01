@@ -102,6 +102,16 @@ public sealed class WorkflowReviewService(
             .SingleOrDefaultAsync(x => x.Id == reviewTaskId, cancellationToken)
             ?? throw new InvalidOperationException($"未找到审核任务：{taskId}");
 
+        var sessionStatus = await dbContext.WorkflowSessions
+            .Where(x => x.Id == reviewTask.WorkflowSessionId)
+            .Select(x => x.Status)
+            .SingleAsync(cancellationToken);
+
+        if (sessionStatus is WorkflowSessionStatus.Cancelled or WorkflowSessionStatus.Failed or WorkflowSessionStatus.Succeeded)
+        {
+            throw new InvalidOperationException($"褰撳墠宸ヤ綔娴佺姸鎬佷负 {sessionStatus}锛屼笉鍏佽缁х画鎻愪氦瀹℃牳銆?");
+        }
+
         if (reviewTask.Status != WorkflowReviewTaskStatus.Pending)
         {
             throw new InvalidOperationException("该审核任务已经处理完成，不能重复提交。");

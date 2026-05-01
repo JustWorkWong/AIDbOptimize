@@ -42,7 +42,17 @@ internal static class ReviewsApiRouteBuilderExtensions
         IWorkflowReviewService reviewService,
         CancellationToken cancellationToken)
     {
-        var result = await reviewService.SubmitAsync(taskId, request, cancellationToken);
-        return Results.Ok(result);
+        try
+        {
+            var result = await reviewService.SubmitAsync(taskId, request, cancellationToken);
+            return Results.Ok(result);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Results.Conflict(new
+            {
+                error = ex.Message
+            });
+        }
     }
 }

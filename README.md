@@ -1,20 +1,22 @@
 # AIDbOptimize
 
-一个最小可运行的 `Aspire + ASP.NET Core + Vue 3 + Vite` 示例项目。
+一个面向数据库配置优化 workflow 的本地开发项目，当前技术栈为 `Aspire + ASP.NET Core + Vue 3 + Vite`。
 
-当前版本聚焦本地开发骨架：
+当前版本已经具备这些核心能力：
 
 - 使用 Aspire 统一编排后端 API、前端 Vite 应用和基础设施容器
 - 提供 `PostgreSQL`、`MySQL`、`Redis`、`RabbitMQ`
-- 所有资源使用固定端口
-- 每个资源都带管理页面
-- 基础设施容器启用持久化卷，重启后数据仍然保留
+- 数据库配置优化 workflow 的发起、review、resume、recovery、history 和 SSE 事件流
+- MCP 连接管理、工具发现、工具执行和 workflow 只读采集链路
+- 控制面持久化、agent session 审计和前端工作台
+- 所有资源使用固定端口，并保留本地管理入口
 
 ## 设计与计划文档
 
 长期设计方案、执行计划和任务清单统一维护在：
 
 - [docs/README.md](./docs/README.md)
+- [Workflow 后端代码流程说明](./docs/workflow/README.md)
 
 当前唯一执行计划：
 
@@ -52,8 +54,9 @@ dotnet run --project .\src\AIDbOptimize.AppHost\AIDbOptimize.AppHost.csproj
 
 当前仓库已完成：
 
-- Aspire 基础编排骨架
-- API / Web 最小可运行项目
-- 文档目录与长期计划目录
+- 基础设施编排与固定端口本地开发环境
+- db-config workflow 后端 runtime、review / resume、history / replay、SSE 事件流
+- MCP 控制面、工具执行审计与 agent 持久化
+- 对应测试工程与前端工作台
 
-后续执行顺序以仓库根 [CLAUDE.md](./CLAUDE.md) 和当前唯一任务清单为准。
+后续执行顺序仍以仓库根 [CLAUDE.md](./CLAUDE.md) 和当前唯一任务清单为准。

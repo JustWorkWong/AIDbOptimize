@@ -4,6 +4,7 @@ import { getWorkflowHistoryDetail } from '../../api/history'
 import { getMcpConnections } from '../../api/mcp'
 import { getReviewTask, submitWorkflowReview } from '../../api/review'
 import {
+  cancelWorkflowSession,
   getWorkflowSession,
   getWorkflowSessions,
   startDbConfigWorkflow,
@@ -202,6 +203,27 @@ async function handleReviewSubmit(action: 'approve' | 'reject' | 'adjust'): Prom
   }
 }
 
+async function handleWorkflowCancel(): Promise<void> {
+  if (!selectedSessionId.value) {
+    message.value = '当前没有可以取消的工作流会话。'
+    return
+  }
+
+  reviewSubmitting.value = true
+  message.value = '正在取消工作流，请稍候…'
+
+  try {
+    const result = await cancelWorkflowSession(selectedSessionId.value)
+    message.value = `工作流已取消：${result.sessionId} -> ${result.status}`
+    await loadSessions()
+    await refreshSelectedSession(selectedSessionId.value)
+  } catch (error) {
+    message.value = error instanceof Error ? error.message : '取消工作流失败。'
+  } finally {
+    reviewSubmitting.value = false
+  }
+}
+
 async function handleReplayRefresh(): Promise<void> {
   if (selectedSessionId.value) {
     await refreshSelectedSession(selectedSessionId.value)
@@ -225,7 +247,7 @@ async function handleReplayRefresh(): Promise<void> {
       :message="message"
       @submit="handleWorkflowSubmit"
     />
-    <WorkflowStatusCard :session="selectedSession" />
+    <WorkflowStatusCard :session="selectedSession" @cancel="handleWorkflowCancel" />
   </section>
 
   <section class="panel-grid">

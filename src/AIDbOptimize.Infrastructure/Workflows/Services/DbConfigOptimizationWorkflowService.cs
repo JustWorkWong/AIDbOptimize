@@ -14,6 +14,7 @@ namespace AIDbOptimize.Infrastructure.Workflows.Services;
 public sealed class DbConfigOptimizationWorkflowService(
     IDbContextFactory<ControlPlaneDbContext> dbContextFactory,
     IWorkflowRuntime workflowRuntime,
+    IWorkflowExecutionRegistry workflowExecutionRegistry,
     IServiceScopeFactory serviceScopeFactory,
     ILogger<DbConfigOptimizationWorkflowService> logger)
     : IDbConfigOptimizationWorkflowService
@@ -36,14 +37,19 @@ public sealed class DbConfigOptimizationWorkflowService(
             request.Options.EnableEvidenceGrounding);
 
         var queued = await workflowRuntime.QueueStartDbConfigAsync(command, cancellationToken);
+        var sessionId = Guid.Parse(queued.SessionId);
 
-        _ = Task.Run(async () =>
+        workflowExecutionRegistry.StartOrReplace(sessionId, async executionCancellationToken =>
         {
             try
             {
                 using var scope = serviceScopeFactory.CreateScope();
                 var runtime = scope.ServiceProvider.GetRequiredService<IWorkflowRuntime>();
-                await runtime.ContinueStartAsync(Guid.Parse(queued.SessionId), command, CancellationToken.None);
+                await runtime.ContinueStartAsync(sessionId, command, executionCancellationToken);
+            }
+            catch (OperationCanceledException) when (executionCancellationToken.IsCancellationRequested)
+            {
+                logger.LogInformation("Workflow cancelled before background start completed. SessionId={SessionId}", queued.SessionId);
             }
             catch (Exception ex)
             {

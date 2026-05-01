@@ -6,6 +6,8 @@
 
 - `docs/mcp/`
   MCP 相关长期说明文档，包括配置、发现、执行和前端交互约定。
+- `docs/workflow/`
+  workflow 后端代码流程、控制面 runtime、review / recovery / cancel 语义说明。
 - `docs/plans/`
   分阶段计划与执行清单。
 - `docs/plans/active/`
@@ -14,6 +16,7 @@
 ## 主题文档
 
 - [MCP 获取 tools 的配置与实现说明](./mcp/README.md)
+- [Workflow 后端代码流程说明](./workflow/README.md)
 - [PostgreSQL MCP 方案对比与推荐](./mcp/postgresql-mcp-options.md)
 
 ## 当前唯一执行计划

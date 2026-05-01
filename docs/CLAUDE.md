@@ -13,6 +13,9 @@ docs/
 ├── mcp/
 │   ├── CLAUDE.md
 │   └── README.md
+├── workflow/
+│   ├── CLAUDE.md
+│   └── README.md
 └── plans/
     ├── README.md
     └── active/
@@ -34,6 +37,10 @@ docs/
   MCP 工具获取、持久化、前端交互、工具执行链路的详细说明。
 - `mcp/CLAUDE.md`
   `docs/mcp/` 子目录的边界、文件用途和后续扩展规则。
+- `workflow/README.md`
+  workflow 后端代码流程主文档，覆盖 API、Application、Runtime、MAF、review、recovery、cancel 和控制面表职责。
+- `workflow/CLAUDE.md`
+  `docs/workflow/` 子目录的边界和维护约束。
 - `plans/README.md`
   计划类文档的约束说明。
 - `plans/active/2026-04-aidboptimize-db-config-workflow/`
@@ -45,6 +52,7 @@ docs/
 
 - `docs/README.md` 依赖各子目录 README 作为详情入口。
 - `docs/mcp/README.md` 依赖源码中的 API、Application、Infrastructure、Web 实现作为事实来源。
+- `docs/workflow/README.md` 依赖 workflow 相关 API、Application、Infrastructure runtime 和控制面实体实现作为事实来源。
 - `docs/plans/*` 依赖当前架构和业务目标，但不反向约束运行时代码。
 
 ## 维护原则

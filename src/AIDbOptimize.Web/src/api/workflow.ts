@@ -11,11 +11,21 @@ type WorkflowEventName = typeof knownWorkflowEventNames[number]
 async function readJson<T>(input: RequestInfo | URL, init?: RequestInit): Promise<T> {
   const response = await fetch(input, init)
   if (!response.ok) {
-    const errorText = await response.text()
-    throw new Error(errorText || `请求失败，状态码：${response.status}`)
+    const error = await readErrorMessage(response)
+    throw new Error(error || `请求失败，状态码：${response.status}`)
   }
 
   return (await response.json()) as T
+}
+
+async function readErrorMessage(response: Response): Promise<string> {
+  const contentType = response.headers.get('Content-Type') ?? ''
+  if (contentType.includes('application/json')) {
+    const payload = (await response.json()) as { error?: string }
+    return payload.error ?? JSON.stringify(payload)
+  }
+
+  return await response.text()
 }
 
 export function startDbConfigWorkflow(payload: DbConfigWorkflowRequest): Promise<WorkflowSessionDetail> {

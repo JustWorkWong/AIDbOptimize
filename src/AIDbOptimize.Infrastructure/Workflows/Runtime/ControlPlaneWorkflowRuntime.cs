@@ -27,10 +27,10 @@ public sealed class ControlPlaneWorkflowRuntime(
     IDbConfigDiagnosisAgentExecutor diagnosisAgentExecutor,
     RecommendationSchemaValidator schemaValidator,
     DbConfigGroundingExecutor groundingExecutor,
-    DbConfigHumanReviewGateExecutor humanReviewGateExecutor,
     ReviewAdjustmentValidator reviewAdjustmentValidator,
     IAgentSessionPersistenceService agentSessionPersistenceService,
-    IAgentSummaryService agentSummaryService)
+    IAgentSummaryService agentSummaryService,
+    IWorkflowExecutionRegistry workflowExecutionRegistry)
     : IWorkflowRuntime
 {
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
@@ -103,10 +103,19 @@ public sealed class ControlPlaneWorkflowRuntime(
         Guid sessionId,
         CancellationToken cancellationToken = default)
     {
+        workflowExecutionRegistry.TryCancel(sessionId);
         await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var session = await dbContext.WorkflowSessions
             .SingleOrDefaultAsync(x => x.Id == sessionId, cancellationToken)
             ?? throw new InvalidOperationException($"未找到工作流会话：{sessionId}");
+
+        if (session.Status == WorkflowSessionStatus.Cancelled)
+        {
+            return new WorkflowCancellationResultDto(
+                sessionId.ToString(),
+                true,
+                PublicStatus(session.Status));
+        }
 
         session.Status = WorkflowSessionStatus.Cancelled;
         session.CurrentNodeKey = "Cancelled";
@@ -120,6 +129,33 @@ public sealed class ControlPlaneWorkflowRuntime(
             status = PublicStatus(session.Status),
             cancelledAt = session.CompletedAt
         });
+
+        if (session.ActiveReviewTaskId.HasValue)
+        {
+            var reviewTask = await dbContext.WorkflowReviewTasks
+                .SingleOrDefaultAsync(x => x.Id == session.ActiveReviewTaskId.Value, cancellationToken);
+            if (reviewTask is not null && reviewTask.Status == WorkflowReviewTaskStatus.Pending)
+            {
+                reviewTask.Status = WorkflowReviewTaskStatus.Cancelled;
+                reviewTask.DecisionBy = "system";
+                reviewTask.DecisionNote = "Workflow cancelled before review submission.";
+                reviewTask.CompletedAt = session.CompletedAt;
+                reviewTask.UpdatedAt = session.UpdatedAt;
+            }
+
+            var waitingNode = await dbContext.WorkflowNodeExecutions
+                .Where(x => x.WorkflowSessionId == session.Id && x.Status == WorkflowNodeExecutionStatus.WaitingForReview)
+                .OrderByDescending(x => x.CreatedAt)
+                .FirstOrDefaultAsync(cancellationToken);
+            if (waitingNode is not null)
+            {
+                waitingNode.Status = WorkflowNodeExecutionStatus.Failed;
+                waitingNode.CompletedAt = session.CompletedAt;
+                waitingNode.ErrorMessage = "Workflow cancelled before review submission.";
+            }
+
+            session.ActiveReviewTaskId = null;
+        }
 
         var nextSequence = await GetNextEventSequenceAsync(dbContext, sessionId, cancellationToken);
         AppendEvent(
@@ -368,6 +404,15 @@ public sealed class ControlPlaneWorkflowRuntime(
 
             await dbContext.SaveChangesAsync(cancellationToken);
         }
+        catch (OperationCanceledException)
+        {
+            if (await IsSessionCancelledAsync(session.Id, CancellationToken.None))
+            {
+                return;
+            }
+
+            throw;
+        }
         catch (Exception ex)
         {
             nextSequence = await GetNextEventSequenceAsync(dbContext, session.Id, cancellationToken);
@@ -409,6 +454,11 @@ public sealed class ControlPlaneWorkflowRuntime(
             .SingleOrDefaultAsync(x => x.Id == sessionId, cancellationToken)
             ?? throw new InvalidOperationException($"Workflow session not found: {sessionId}");
 
+        if (await IsSessionCancelledAsync(session.Id, cancellationToken))
+        {
+            return await BuildDetailAsync(dbContext, session.Id, cancellationToken);
+        }
+
         var reviewTaskId = request.ReviewTaskId is not null && Guid.TryParse(request.ReviewTaskId, out var parsedTaskId)
             ? parsedTaskId
             : session.ActiveReviewTaskId ?? throw new InvalidOperationException("当前工作流没有可恢复的审核任务。");
@@ -433,6 +483,10 @@ public sealed class ControlPlaneWorkflowRuntime(
         }
 
         var graphResult = await ExecuteMafResumeGraphAsync(session.Id, reviewTask, cancellationToken);
+        if (await IsSessionCancelledAsync(session.Id, cancellationToken))
+        {
+            return await BuildDetailAsync(dbContext, session.Id, cancellationToken);
+        }
         var sequence = await GetNextEventSequenceAsync(dbContext, session.Id, cancellationToken);
         AppendEvent(
             dbContext,
@@ -541,6 +595,11 @@ public sealed class ControlPlaneWorkflowRuntime(
             .SingleOrDefaultAsync(x => x.Id == sessionId, cancellationToken)
             ?? throw new InvalidOperationException($"Workflow session not found: {sessionId}");
 
+        if (await IsSessionCancelledAsync(session.Id, cancellationToken))
+        {
+            return await BuildDetailAsync(dbContext, session.Id, cancellationToken);
+        }
+
         if (session.Status == WorkflowSessionStatus.WaitingForReview)
         {
             return await BuildDetailAsync(dbContext, session.Id, cancellationToken);
@@ -548,7 +607,32 @@ public sealed class ControlPlaneWorkflowRuntime(
 
         if (string.IsNullOrWhiteSpace(session.EngineCheckpointRef))
         {
-            throw new InvalidOperationException("Workflow recovery requires an engine checkpoint ref.");
+            session.Status = WorkflowSessionStatus.Recovering;
+            session.UpdatedAt = DateTimeOffset.UtcNow;
+            UpdateStateJson(session, new
+            {
+                sessionId = session.Id,
+                status = PublicStatus(session.Status),
+                currentNode = session.CurrentNodeKey,
+                trigger = request.Trigger
+            });
+
+            var nextSequence = await GetNextEventSequenceAsync(dbContext, session.Id, cancellationToken);
+            AppendEvent(
+                dbContext,
+                session.Id,
+                ref nextSequence,
+                WorkflowEventType.WorkflowRecovered,
+                "workflow.recovered",
+                new { sessionId = session.Id, recoveryMode = "restart-start", trigger = request.Trigger },
+                "Workflow recovery restarted from queued start.");
+            await dbContext.SaveChangesAsync(cancellationToken);
+
+            var command = JsonSerializer.Deserialize<DbConfigWorkflowCommand>(session.InputPayloadJson, SerializerOptions)
+                ?? throw new InvalidOperationException("Workflow input payload could not be deserialized.");
+            await ExecuteStartSessionAsync(session.Id, command, activity, cancellationToken);
+            dbContext.ChangeTracker.Clear();
+            return await BuildDetailAsync(dbContext, session.Id, cancellationToken);
         }
 
         session.Status = WorkflowSessionStatus.Recovering;
@@ -572,6 +656,10 @@ public sealed class ControlPlaneWorkflowRuntime(
             "Workflow recovery resumed.");
 
         var graphResult = await ExecuteMafRecoveryGraphAsync(session.Id, session.EngineCheckpointRef, cancellationToken);
+        if (await IsSessionCancelledAsync(session.Id, cancellationToken))
+        {
+            return await BuildDetailAsync(dbContext, session.Id, cancellationToken);
+        }
         session.EngineCheckpointRef = graphResult.LastCheckpointRef ?? session.EngineCheckpointRef;
 
         if (graphResult.RequestInfo is not null)
@@ -691,72 +779,7 @@ public sealed class ControlPlaneWorkflowRuntime(
     {
         var store = new MafJsonCheckpointStore(dbContextFactory);
         var checkpointManager = MafWorkflowGraphFactory.CreateCheckpointManager(store);
-
-        var validationExecutor = new FunctionExecutor<MafWorkflowStartMessage, MafValidatedMessage>(
-            "DbConfigInputValidationExecutor",
-            (message, context, ct) => HandleValidationMessageAsync(message, ct));
-        var snapshotExecutor = new FunctionExecutor<MafValidatedMessage, MafSnapshotMessage>(
-            "DbConfigSnapshotCollectorExecutor",
-            (message, context, ct) => HandleSnapshotMessageAsync(message, ct));
-        var ruleExecutor = new FunctionExecutor<MafSnapshotMessage, MafEvidenceMessage>(
-            "DbConfigRuleAnalysisExecutor",
-            (message, context, ct) => HandleRuleAnalysisMessageAsync(message, ct));
-        var diagnosisExecutor = new FunctionExecutor<MafEvidenceMessage, MafDiagnosisMessage>(
-            "DbConfigDiagnosisAgentExecutor",
-            (message, context, ct) => HandleDiagnosisMessageAsync(message, ct));
-        var groundingExecutorBinding = new FunctionExecutor<MafDiagnosisMessage, MafGroundedMessage>(
-            "DbConfigGroundingExecutor",
-            (message, context, ct) => HandleGroundingMessageAsync(message, ct));
-        var reviewRequestExecutor = new FunctionExecutor<MafGroundedMessage, MafReviewRequest>(
-            "DbConfigHumanReviewGateExecutor",
-            (message, context, ct) => HandleReviewRequestMessageAsync(message, ct));
-        var directCompletionExecutor = new FunctionExecutor<MafGroundedMessage, MafCompletionMessage>(
-            "DbConfigCompletionDirectExecutor",
-            (message, context, ct) => ValueTask.FromResult(new MafCompletionMessage(
-                message.SessionId,
-                message.ReportJson,
-                false,
-                null,
-                null,
-                null,
-                null,
-                null)));
-        var reviewPort = RequestPort.Create<MafReviewRequest, MafReviewResponse>("workflow-review-port");
-        var reviewResponseExecutor = new FunctionExecutor<MafReviewResponse, MafCompletionMessage>(
-            "DbConfigReviewResponseExecutor",
-            (response, context, ct) => ValueTask.FromResult(new MafCompletionMessage(
-                Guid.Empty,
-                string.Empty,
-                string.Equals(response.Action, "reject", StringComparison.OrdinalIgnoreCase),
-                response.Comment,
-                response.Action,
-                response.Reviewer,
-                response.Comment,
-                response.AdjustmentsJson)));
-
-        var startBinding = validationExecutor.BindExecutor();
-        var snapshotBinding = snapshotExecutor.BindExecutor();
-        var ruleBinding = ruleExecutor.BindExecutor();
-        var diagnosisBinding = diagnosisExecutor.BindExecutor();
-        var groundingBinding = groundingExecutorBinding.BindExecutor();
-        var reviewRequestBinding = reviewRequestExecutor.BindExecutor();
-        var directCompletionBinding = directCompletionExecutor.BindExecutor();
-        var reviewPortBinding = reviewPort.BindAsExecutor(false);
-        var reviewResponseBinding = reviewResponseExecutor.BindExecutor();
-
-        var workflow = new WorkflowBuilder(startBinding)
-            .WithName("DbConfigOptimization")
-            .WithDescription("Database configuration optimization workflow")
-            .AddEdge(startBinding, snapshotBinding)
-            .AddEdge(snapshotBinding, ruleBinding)
-            .AddEdge(ruleBinding, diagnosisBinding)
-            .AddEdge(diagnosisBinding, groundingBinding)
-            .AddEdge<MafGroundedMessage>(groundingBinding, reviewRequestBinding, message => message.Command.RequireHumanReview)
-            .AddEdge<MafGroundedMessage>(groundingBinding, directCompletionBinding, message => !message.Command.RequireHumanReview)
-            .AddEdge(reviewRequestBinding, reviewPortBinding)
-            .AddEdge(reviewPortBinding, reviewResponseBinding)
-            .WithOutputFrom(directCompletionBinding, reviewResponseBinding)
-            .Build();
+        var workflow = BuildDbConfigMafWorkflow();
 
         var run = await InProcessExecution.RunAsync(
             workflow,
@@ -792,7 +815,6 @@ public sealed class ControlPlaneWorkflowRuntime(
     {
         var store = new MafJsonCheckpointStore(dbContextFactory);
         var checkpointManager = MafWorkflowGraphFactory.CreateCheckpointManager(store);
-        var command = await LoadCommandAsync(sessionId, cancellationToken);
         var workflow = BuildDbConfigMafWorkflow();
         var run = await InProcessExecution.ResumeAsync(
             workflow,
@@ -926,8 +948,8 @@ public sealed class ControlPlaneWorkflowRuntime(
             .AddEdge(snapshotBinding, ruleBinding)
             .AddEdge(ruleBinding, diagnosisBinding)
             .AddEdge(diagnosisBinding, groundingBinding)
-            .AddEdge<MafGroundedMessage>(groundingBinding, reviewRequestBinding, message => message.Command.RequireHumanReview)
-            .AddEdge<MafGroundedMessage>(groundingBinding, directCompletionBinding, message => !message.Command.RequireHumanReview)
+            .AddEdge<MafGroundedMessage>(groundingBinding, reviewRequestBinding, message => message?.Command?.RequireHumanReview == true)
+            .AddEdge<MafGroundedMessage>(groundingBinding, directCompletionBinding, message => message?.Command?.RequireHumanReview != true)
             .AddEdge(reviewRequestBinding, reviewPortBinding)
             .AddEdge(reviewPortBinding, reviewResponseBinding)
             .WithOutputFrom(directCompletionBinding, reviewResponseBinding)
@@ -1022,6 +1044,7 @@ public sealed class ControlPlaneWorkflowRuntime(
         await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var session = await dbContext.WorkflowSessions
             .SingleAsync(x => x.Id == message.SessionId, cancellationToken);
+        await ThrowIfWorkflowCancellationRequestedAsync(dbContext, session.Id, cancellationToken);
         var connection = await dbContext.McpConnections
             .AsNoTracking()
             .SingleAsync(x => x.Id == session.ConnectionId, cancellationToken);
@@ -1037,6 +1060,7 @@ public sealed class ControlPlaneWorkflowRuntime(
         await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var session = await dbContext.WorkflowSessions
             .SingleAsync(x => x.Id == message.SessionId, cancellationToken);
+        await ThrowIfWorkflowCancellationRequestedAsync(dbContext, session.Id, cancellationToken);
         var connection = await dbContext.McpConnections
             .AsNoTracking()
             .SingleAsync(x => x.Id == session.ConnectionId, cancellationToken);
@@ -1052,6 +1076,7 @@ public sealed class ControlPlaneWorkflowRuntime(
         await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var session = await dbContext.WorkflowSessions
             .SingleAsync(x => x.Id == message.SessionId, cancellationToken);
+        await ThrowIfWorkflowCancellationRequestedAsync(dbContext, session.Id, cancellationToken);
         var sequence = await GetNextEventSequenceAsync(dbContext, session.Id, cancellationToken);
         var evidence = await ExecuteRuleAnalysisAsync(dbContext, session, message.Snapshot, sequence, cancellationToken);
         return new MafEvidenceMessage(message.SessionId, message.Command, evidence);
@@ -1064,6 +1089,7 @@ public sealed class ControlPlaneWorkflowRuntime(
         await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var session = await dbContext.WorkflowSessions
             .SingleAsync(x => x.Id == message.SessionId, cancellationToken);
+        await ThrowIfWorkflowCancellationRequestedAsync(dbContext, session.Id, cancellationToken);
         var connection = await dbContext.McpConnections
             .AsNoTracking()
             .SingleAsync(x => x.Id == session.ConnectionId, cancellationToken);
@@ -1087,6 +1113,7 @@ public sealed class ControlPlaneWorkflowRuntime(
         await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var session = await dbContext.WorkflowSessions
             .SingleAsync(x => x.Id == message.SessionId, cancellationToken);
+        await ThrowIfWorkflowCancellationRequestedAsync(dbContext, session.Id, cancellationToken);
         var sequence = await GetNextEventSequenceAsync(dbContext, session.Id, cancellationToken);
         if (message.Command.EnableEvidenceGrounding)
         {
@@ -1112,6 +1139,7 @@ public sealed class ControlPlaneWorkflowRuntime(
         await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var session = await dbContext.WorkflowSessions
             .SingleAsync(x => x.Id == message.SessionId, cancellationToken);
+        await ThrowIfWorkflowCancellationRequestedAsync(dbContext, session.Id, cancellationToken);
         session.CurrentNodeKey = "DbConfigHumanReviewGateExecutor";
         session.UpdatedAt = DateTimeOffset.UtcNow;
         UpdateStateJson(session, new
@@ -1132,18 +1160,6 @@ public sealed class ControlPlaneWorkflowRuntime(
             message.AgentSessionId,
             message.SummaryId,
             message.TokenUsageJson);
-    }
-
-    private async Task<DbConfigWorkflowCommand> LoadCommandAsync(
-        Guid sessionId,
-        CancellationToken cancellationToken)
-    {
-        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-        var session = await dbContext.WorkflowSessions
-            .AsNoTracking()
-            .SingleAsync(x => x.Id == sessionId, cancellationToken);
-        return JsonSerializer.Deserialize<DbConfigWorkflowCommand>(session.InputPayloadJson, SerializerOptions)
-            ?? throw new InvalidOperationException("Workflow input payload could not be deserialized.");
     }
 
     private async Task ExecuteValidationAsync(
@@ -1462,6 +1478,8 @@ public sealed class ControlPlaneWorkflowRuntime(
         string? lastCheckpointRef,
         CancellationToken cancellationToken)
     {
+        await ThrowIfWorkflowCancellationRequestedAsync(dbContext, session.Id, cancellationToken);
+
         MafReviewRequest? reviewPayload = null;
         if (requestInfo is not null &&
             (!requestInfo.Request.TryGetDataAs<MafReviewRequest>(out reviewPayload) || reviewPayload is null))
@@ -1556,6 +1574,8 @@ public sealed class ControlPlaneWorkflowRuntime(
         string completionMessage,
         CancellationToken cancellationToken)
     {
+        await ThrowIfWorkflowCancellationRequestedAsync(dbContext, session.Id, cancellationToken);
+
         var execution = CreateNodeExecution(session.Id, "DbConfigCompletionExecutor", "projection", resultPayloadJson);
         dbContext.WorkflowNodeExecutions.Add(execution);
         AppendEvent(dbContext, session.Id, ref nextSequence, WorkflowEventType.ExecutorStarted, "executor.started", new
@@ -1954,6 +1974,31 @@ public sealed class ControlPlaneWorkflowRuntime(
             .Where(x => x.WorkflowSessionId == sessionId)
             .Select(x => (long?)x.SequenceNo)
             .MaxAsync(cancellationToken) ?? 0;
+    }
+
+    private async Task ThrowIfWorkflowCancellationRequestedAsync(
+        ControlPlaneDbContext dbContext,
+        Guid sessionId,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (await IsSessionCancelledAsync(sessionId, cancellationToken))
+        {
+            throw new OperationCanceledException($"Workflow session {sessionId} has been cancelled.", cancellationToken);
+        }
+    }
+
+    private async Task<bool> IsSessionCancelledAsync(
+        Guid sessionId,
+        CancellationToken cancellationToken)
+    {
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        return await dbContext.WorkflowSessions
+            .AsNoTracking()
+            .Where(x => x.Id == sessionId)
+            .Select(x => x.Status == WorkflowSessionStatus.Cancelled)
+            .SingleAsync(cancellationToken);
     }
 
     private async Task<WorkflowSessionDetailDto> BuildDetailAsync(
