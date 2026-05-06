@@ -5,11 +5,13 @@ internal static class WorkflowProgressCalculator
     private static readonly IReadOnlyDictionary<string, int> ProgressByNode = new Dictionary<string, int>(StringComparer.Ordinal)
     {
         ["DbConfigInputValidationExecutor"] = 10,
-        ["DbConfigSnapshotCollectorExecutor"] = 25,
-        ["DbConfigRuleAnalysisExecutor"] = 45,
-        ["DbConfigDiagnosisAgentExecutor"] = 65,
-        ["DbConfigGroundingExecutor"] = 80,
+        ["InvestigationPlanner"] = 25,
+        ["EvidenceCollectionSubworkflow"] = 45,
+        ["SkillPolicyGate"] = 55,
+        ["DbConfigDiagnosisAgentExecutor"] = 70,
+        ["DbConfigGroundingExecutor"] = 85,
         ["DbConfigHumanReviewGateExecutor"] = 90,
+        ["DbConfigPolicyBlockedCompletionExecutor"] = 100,
         ["DbConfigCompletionExecutor"] = 100,
         ["Cancelled"] = 100
     };

@@ -54,6 +54,12 @@ public static class MafWorkflowGraphFactory
                 sessionId,
                 new DbConfigWorkflowCommand(
                     sessionId,
+                    "graph-probe",
+                    "1.0.0",
+                    "graph-probe-investigation",
+                    "1.0.0",
+                    "graph-probe-diagnosis",
+                    "1.0.0",
                     "probe",
                     null,
                     true,

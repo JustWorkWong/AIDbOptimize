@@ -11,6 +11,7 @@ public sealed record WorkflowSessionSummaryDto(
     string? CurrentNode,
     int ProgressPercent,
     WorkflowConnectionDto Connection,
+    WorkflowSkillSelectionDto? SkillSelection,
     string? ActiveReviewTaskId,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt,

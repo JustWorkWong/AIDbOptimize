@@ -5,6 +5,12 @@ namespace AIDbOptimize.Infrastructure.Workflows.Runtime;
 /// </summary>
 public sealed record DbConfigWorkflowCommand(
     Guid ConnectionId,
+    string BundleId,
+    string BundleVersion,
+    string InvestigationSkillId,
+    string InvestigationSkillVersion,
+    string DiagnosisSkillId,
+    string DiagnosisSkillVersion,
     string RequestedBy,
     string? Notes,
     bool AllowFallbackSnapshot,

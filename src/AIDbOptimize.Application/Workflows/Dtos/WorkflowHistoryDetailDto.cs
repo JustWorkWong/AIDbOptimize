@@ -12,6 +12,7 @@ public sealed record WorkflowHistoryDetailDto(
     WorkflowConnectionDto Connection,
     WorkflowResultDto? Result,
     WorkflowSummaryReferenceDto? Summary,
+    WorkflowSkillSelectionDto? SkillSelection,
     string? Error,
     IReadOnlyList<WorkflowHistoryNodeExecutionDto> NodeExecutions,
     IReadOnlyList<WorkflowHistoryToolExecutionDto> ToolExecutions,

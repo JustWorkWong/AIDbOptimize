@@ -14,6 +14,7 @@ public sealed record WorkflowSessionDetailDto(
     WorkflowReviewReferenceDto? Review,
     WorkflowResultDto? Result,
     WorkflowSummaryReferenceDto? Summary,
+    WorkflowSkillSelectionDto? SkillSelection,
     string? Error,
     string StreamUrl,
     DateTimeOffset CreatedAt,
@@ -33,6 +34,14 @@ public sealed record WorkflowReviewReferenceDto(
 public sealed record WorkflowSummaryReferenceDto(
     string AgentSessionId,
     DateTimeOffset UpdatedAt);
+
+public sealed record WorkflowSkillSelectionDto(
+    string BundleId,
+    string BundleVersion,
+    string InvestigationSkillId,
+    string InvestigationSkillVersion,
+    string DiagnosisSkillId,
+    string DiagnosisSkillVersion);
 
 public sealed record WorkflowResultDto(
     string ResultType,
@@ -58,6 +67,7 @@ public sealed record WorkflowRecommendationDto(
     string? ImpactSummary,
     IReadOnlyList<string> EvidenceReferences,
     string RecommendationClass,
+    string RecommendationType,
     string? AppliesWhen,
     string? RuleId,
     string? RuleVersion);

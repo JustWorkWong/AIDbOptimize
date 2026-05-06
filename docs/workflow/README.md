@@ -1,19 +1,52 @@
 # Workflow 后端代码流程说明
 
-本文档描述当前 `DbConfigOptimization` workflow 在后端的真实代码链路，重点解释：
+本文档描述当前 `DbConfigOptimization` workflow 在后端的真实代码链路，重点说明：
 
 - 请求如何从 API 进入 Application / Runtime
-- MAF graph 和控制面 runtime 各自负责什么
-- review / resume / recovery / cancel 的实际落点
-- 控制面持久化表分别承担什么职责
-- SSE 与 history 为什么能拿到当前状态和历史明细
+- `skills v1` 主链如何驱动规划、采集、gate、diagnosis 和 completion
+- review / resume / recovery / cancel 的真实落点
+- 哪些状态落在控制面数据库，哪些状态只是 graph 编排结果
+- SSE、history、checkpoint 为什么能稳定回放当前与历史状态
 
-如果要看需求边界和排期，请回到：
+如果要看本轮范围和执行拆解，请回到：
 
-- [当前 workflow 总体方案](../plans/active/2026-04-aidboptimize-db-config-workflow/design.md)
-- [当前 workflow 详细设计](../plans/active/2026-04-aidboptimize-db-config-workflow/detailed-design.md)
+- [workflow skills v1 方案](../plans/active/2026-05-aidboptimize-workflow-skills-v1/design.md)
+- [workflow skills v1 详细方案](../plans/active/2026-05-aidboptimize-workflow-skills-v1/detailed-design.md)
+- [workflow skills v1 任务清单](../plans/active/2026-05-aidboptimize-workflow-skills-v1/tasks.md)
 
-## 1. 后端模块分层
+## 1. skills 与 RAG 边界
+
+`docs/workflow/skills/` 已经是 workflow 规则资产的长期落点，当前仓库已经落地：
+
+- MySQL / PostgreSQL investigation skill
+- MySQL / PostgreSQL diagnosis skill
+- bundle 级组合说明
+- 受控 markdown 契约解析器与 bundle resolver
+
+当前仍要明确区分两件事：
+
+1. `skills`
+   已经接入 runtime 主链，不再只是文档规划。
+2. `RAG`
+   仍然只有协议预留位，没有接入真实 retrieval、知识注入或外部知识裁决。
+
+因此，后续所有文档都必须遵守同一条边界：
+
+- skill 可以决定“查什么、怎么降级、怎么输出”
+- RAG 未来只能提供 diagnosis 附加上下文，不能补齐 required evidence，也不能改变 gate 判定
+
+未来如果接入 `FactRagExecutor / CaseRagExecutor`，插入位置也已经固定：
+
+```text
+SkillPolicyGate
+  -> FactRagExecutor / CaseRagExecutor (future, optional)
+  -> DiagnosisAgent
+  -> Grounding
+```
+
+也就是说，RAG 只能增强 diagnosis 的上下文，不能回流修改 planner、collection 或 gate 结果。
+
+## 2. 后端分层
 
 当前 workflow 相关后端代码主要分成 4 层：
 
@@ -24,30 +57,31 @@ ApiService
       -> MAF Graph + Persistence + Projection
 ```
 
-对应职责：
+各层职责如下：
 
 - `ApiService`
-  负责 HTTP 路由、请求绑定和响应返回。
+  负责 HTTP 路由、请求绑定和返回码，不承担 workflow 状态机语义。
 - `Application / Services`
-  负责把前端请求转成 workflow command，决定是排队启动、查询、取消还是提交 review。
+  把前端请求转成 workflow command，决定是 start、detail、cancel 还是 review submit。
 - `Infrastructure / Runtime`
-  负责 workflow 会话状态机、checkpoint、review task、history event、node execution、恢复和取消保护。
+  负责 session 状态、history、checkpoint、review task、cancel、防重入、recovery 和投影。
 - `MAF graph`
-  负责节点顺序、request port、resume 后的 completion 输出。
+  只负责节点编排、分支和 review request / response 的连接。
 
-这 4 层里，真正的业务语义控制中心是 `ControlPlaneWorkflowRuntime`，而不是 API，也不是 MAF graph 本身。
+当前真正的业务控制中心是 `ControlPlaneWorkflowRuntime`，不是 API，也不是 graph 本身。
 
-## 2. workflow 发起链路
+## 3. start 链路
 
 发起入口：
 
 - `POST /api/workflows/db-config-optimization`
 
-主要调用链：
+主调用链路：
 
 ```text
 WorkflowsApi
   -> IDbConfigOptimizationWorkflowService.StartAsync
+    -> WorkflowSkillResolver.Resolve(...)
     -> IWorkflowRuntime.QueueStartDbConfigAsync
     -> IWorkflowExecutionRegistry.StartOrReplace
       -> IWorkflowRuntime.ContinueStartAsync
@@ -55,126 +89,186 @@ WorkflowsApi
           -> ExecuteMafStartGraphAsync
 ```
 
-代码职责拆分：
+关键点：
 
-- `WorkflowsApi`
-  只负责收请求并返回 `202 Accepted`。
-- `DbConfigOptimizationWorkflowService.StartAsync`
-  先创建一条 `workflow_sessions` 记录，再把后台启动任务注册到 `IWorkflowExecutionRegistry`。
-- `WorkflowExecutionRegistry`
-  维护 `sessionId -> CancellationTokenSource / background task` 的运行时映射，供 cancel 最佳努力停止使用。
-- `ControlPlaneWorkflowRuntime.QueueStartDbConfigAsync`
-  只创建 session，不真正执行 graph。
-- `ControlPlaneWorkflowRuntime.ContinueStartAsync`
-  在后台继续执行，负责打点和失败统计。
+1. `DbConfigOptimizationWorkflowService.StartAsync`
+   会先读取连接引擎，再用 `WorkflowSkillResolver` 解析 bundle、investigation skill、diagnosis skill。
+2. `DbConfigWorkflowCommand`
+   从 start 开始就显式带上：
+   `bundleId`、`bundleVersion`、`investigationSkillId`、`investigationSkillVersion`、`diagnosisSkillId`、`diagnosisSkillVersion`。
+3. `QueueStartDbConfigAsync`
+   先创建 `workflow_sessions` 记录，把 command 持久化到 `InputPayloadJson`，但不在当前请求线程里跑 graph。
+4. `WorkflowExecutionRegistry`
+   维护 `sessionId -> CancellationTokenSource / background task` 的运行时映射，用于 cancel 和防止旧后台任务覆盖新状态。
+5. `ContinueStartAsync`
+   在后台继续执行 graph，并把中间状态持续投影到控制面表。
 
-### 2.1 启动期 session 长什么样
+## 4. 当前真实 graph
 
-`QueueStartDbConfigAsync(...)` 会先创建一条 `workflow_sessions`：
-
-- `Status = Running`
-- `CurrentNodeKey = DbConfigInputValidationExecutor`
-- `InputPayloadJson` 保存完整 `DbConfigWorkflowCommand`
-- `EngineRunId` 先生成
-- `ResultPayloadJson = {}`
-
-这样做的意义是：
-
-- API 能立即返回一个 `sessionId`
-- recovery 可以在启动未完成时依靠 `InputPayloadJson` 重新拉起
-
-## 3. MAF graph 和 runtime 的分工
-
-当前 graph 逻辑固定为：
+当前 `BuildDbConfigMafWorkflow()` 的真实节点顺序如下：
 
 ```text
 DbConfigInputValidationExecutor
-  -> DbConfigSnapshotCollectorExecutor
-  -> DbConfigRuleAnalysisExecutor
+  -> InvestigationPlanner
+  -> EvidenceCollectionSubworkflow
+  -> SkillPolicyGate
   -> DbConfigDiagnosisAgentExecutor
   -> DbConfigGroundingExecutor
-  -> DbConfigHumanReviewGateExecutor 或 DbConfigCompletionDirectExecutor
-  -> RequestPort / ReviewResponseExecutor
+  -> DbConfigHumanReviewGateExecutor or DbConfigCompletionDirectExecutor
+
+SkillPolicyGate(blocked)
+  -> DbConfigPolicyBlockedCompletionExecutor
+
+DbConfigHumanReviewGateExecutor
+  -> RequestPort<MafReviewRequest, MafReviewResponse>
+  -> DbConfigReviewResponseExecutor
 ```
 
-关键点：
+这条链路和旧版“固定 snapshot -> rule analysis -> diagnosis”已经不同：
 
-- `start / resume / recovery` 共享同一张 `BuildDbConfigMafWorkflow()` 生成的 graph
-- runtime 决定“从哪里开始”和“如何处理输出”
-- MAF 只负责编排节点与 request/response 续跑
+1. planner 先把 skill ref 映射成 capability 计划。
+2. collection subworkflow 按计划做采集，而不是无条件全量采集。
+3. policy gate 在 diagnosis 前做 `pass / degraded / blocked` 判定。
+4. blocked 路径直接完成，避免缺证据时继续生成看似确定的建议。
 
-### 3.1 graph 负责什么
+## 5. graph 与 runtime 的分工
 
-MAF graph 负责：
+### 5.1 graph 负责什么
+
+graph 只负责：
 
 - 节点顺序
-- `RequireHumanReview` 分支
+- blocked / direct completion / human review 分支
 - `RequestPort<MafReviewRequest, MafReviewResponse>`
-- `Run.ResumeAsync(...)` 后产生 `MafCompletionMessage`
+- resume 后从 pending request 继续跑到 completion
 
-### 3.2 runtime 负责什么
+### 5.2 runtime 负责什么
 
 `ControlPlaneWorkflowRuntime` 负责：
 
-- session 状态变化
-- review task 创建 / 更新
-- checkpoint 落库
-- node execution 审计
-- workflow event 投影
-- agent session / summary 持久化
-- cancel 防脏写
-- recovery 分支判断
+- 创建和更新 `workflow_sessions`
+- 记录 `workflow_node_executions`
+- 追加 `workflow_events`
+- 创建 `workflow_checkpoints`
+- 落库 review task
+- 持久化 agent session / summary
+- cancel 后阻止旧任务覆写状态
+- recovery 时判断“从 checkpoint 续跑”还是“重启 start”
 
-一个简单判断标准是：
+判断标准很简单：
 
 - “节点怎么连”是 graph 的事
-- “数据库里怎么记、前端怎么看、取消时怎么保护”是 runtime 的事
+- “数据库怎么记、前端怎么查、取消后怎么保护状态”是 runtime 的事
 
-## 4. 节点执行真实链路
+## 6. planner、collection 与 gate
 
-`ExecuteMafStartGraphAsync(...)` 和 `BuildDbConfigMafWorkflow()` 内部通过 `FunctionExecutor` 把节点映射到 runtime handler：
+### 6.1 SkillResolver
 
-- `HandleValidationMessageAsync`
-- `HandleSnapshotMessageAsync`
-- `HandleRuleAnalysisMessageAsync`
-- `HandleDiagnosisMessageAsync`
-- `HandleGroundingMessageAsync`
-- `HandleReviewRequestMessageAsync`
+`WorkflowSkillResolver` 的职责：
 
-这些 handler 的共同模式是：
+1. 根据 `engine + workflowType + requested bundle/version` 解析最终 bundle。
+2. 加载 investigation skill 与 diagnosis skill。
+3. 在解析阶段阻断 bundle/version 不匹配、skill 缺失、bundle 内 skill 不一致等错误。
 
-1. 从控制面库加载当前 session
-2. 检查 workflow 是否已被取消
-3. 执行对应业务节点
-4. 更新 `workflow_node_executions`
-5. 追加 `workflow_events`
-6. 更新 `workflow_sessions.CurrentNodeKey / StateJson / ResultPayloadJson`
+解析结果从 start 开始进入 command，并在后续 resume / recovery 中通过已持久化 command 复用，不允许同一 session 漂移到另一套 bundle/version。
 
-### 4.1 Snapshot 节点
+### 6.2 InvestigationPlanner
 
-`DbConfigSnapshotCollectorExecutor` 不让 agent 自由调工具，而是通过固定模板走：
+`InvestigationPlanner` 不输出 SQL，只输出 `InvestigationPlan`：
 
-```text
-IMcpToolExecutionService
-  -> McpClientFactory
-  -> real MCP server
-  -> CallToolAsync
-  -> McpToolExecutions audit
-```
+- `planId`
+- `bundleId / bundleVersion`
+- `skillId / skillVersion`
+- capability steps
+- required / optional refs
+- baseline refs
+- retrieval hints
+- missing context policy
 
-所以 workflow 主路径的采集是“确定性 + 可审计”的，不是 agent 随机选工具。
+planner 通过 `EvidenceCapabilityCatalog` 把逻辑 evidence ref 映射成 capability，而不是直接把 skill 内容喂给 collector。
 
-### 4.2 Diagnosis 节点
+### 6.3 EvidenceCollectionSubworkflow
 
-`DbConfigDiagnosisAgentExecutor` 的输出会被 runtime 进一步做 3 件事：
+`EvidenceCollectionSubworkflow` 做三件事：
 
-- `RecommendationSchemaValidator` 校验结构
-- `AgentSessionPersistenceService` 保存 agent session / messages
-- `AgentSummaryService` 生成滚动 summary
+1. 根据 plan 构造 `DbConfigSnapshotCollectionRequest`
+   只请求本次计划需要的 collector key、value key 和 host context。
+2. 补齐跨引擎 baseline 元数据
+   例如：
+   `engine.version`
+   `deployment.flavor`
+   `parameter.source`
+   `parameter.apply_scope`
+   `parameter.normalized_unit`
+3. 产出 `CollectionExecutionSummary`
+   记录 planned / collected 数量、missing refs 和 `CapabilityCollectionResult[]`。
 
-因此 agent 结果不是只存在内存里，而是同步沉淀到控制面库。
+它还会把以下关键信息写进 `collectionMetadata`：
 
-## 5. review / resume 链路
+- `bundle_id`
+- `bundle_version`
+- `investigation_skill_id`
+- `investigation_skill_version`
+- `plan_id`
+- `planned_evidence_count`
+- `collected_evidence_count`
+- `planned_capability_ids_json`
+- `planned_skill_references_json`
+- `missing_required_evidence_refs`
+- `missing_optional_evidence_refs`
+- `capability_results_json`
+- `missing_context_policy`
+- `retrieval_hints_json`
+
+### 6.4 SkillPolicyGate
+
+`SkillPolicyGate` 负责把采集结果翻译成稳定的 gate 语义：
+
+- `pass`
+  必要证据满足，允许进入 diagnosis。
+- `degraded`
+  有缺口，但不命中 blocking rule，允许继续 diagnosis，但结果必须带降级语义。
+- `blocked`
+  缺失命中 blocking rule 的必要证据，workflow 直接停止在 diagnosis 前。
+
+gate 会继续把这些字段写回 `collectionMetadata`：
+
+- `skill_id`
+- `skill_version`
+- `plan_id`
+- `collection_completeness`
+- `gate_status`
+
+blocked 路径会生成结构化 report JSON，而不是只返回一个异常字符串。
+
+## 7. diagnosis、grounding 与 recommendationType
+
+`DbConfigDiagnosisAgentExecutor` 现在消费的是 `DiagnosisSkillDefinition` 约束后的输入，而不是自由 prompt。
+
+诊断 agent 配置约定：
+
+- 基础键路径固定为 `AIDbOptimize:Agent:Diagnosis`。
+- 仓库内 `src/AIDbOptimize.ApiService/appsettings.json` 只保留占位配置，`ApiKey` 默认写成 `xxx`，避免把共享配置误当成可直接运行的真实密钥。
+- 本地真实密钥应写在 `src/AIDbOptimize.ApiService/appsettings.Local.json`，`Program.cs` 会在默认配置之上额外加载它，因此本地值优先级更高。
+- 如果 `ApiKey` 为空或仍是占位值，workflow 不会兜底跳过 diagnosis，而会直接报出显式配置错误。
+
+后续结果至少经过这些约束点：
+
+1. `RecommendationSchemaValidator`
+   保证输出结构稳定。
+2. `DiagnosisRuleEvaluator`
+   对缺失 host context、低置信度、forbidden pattern 等规则做二次校验。
+3. `DbConfigGroundingExecutor`
+   保证每条 actionable recommendation 都能回指到 evidence。
+
+`DbConfigRecommendation` 以及 API / 前端 DTO 已经显式暴露 `recommendationType`：
+
+- `actionableRecommendation`
+- `requestMoreContext`
+
+因此“缺更多上下文”不再伪装成普通可执行调优建议。
+
+## 8. review / resume 链路
 
 review 入口：
 
@@ -189,50 +283,21 @@ ReviewsApi
   -> WorkflowReviewService.SubmitAsync
     -> 更新 workflow_review_tasks
     -> IWorkflowRuntime.ResumeAsync(trigger=review-submit)
-      -> RunResumeAsync
-        -> ExecuteMafResumeGraphAsync
-        -> ExecuteCompletionAsync 或 Cancelled
+      -> ExecuteMafResumeGraphAsync
+      -> DbConfigReviewResponseExecutor
+      -> ExecuteCompletionAsync
 ```
 
-### 5.1 review task 是怎么创建的
+关键点：
 
-当 graph 进入 review 分支后：
+1. review submit 不是单纯改一条 review 状态。
+2. runtime 会校验 session 当前是否仍允许恢复。
+3. 它会把 review 决策喂回 MAF `RequestPort`，再统一走 completion、checkpoint 和 history 收尾。
+4. 对已经 cancelled / failed / completed 的 session，review submit 会返回冲突，而不是伪造恢复成功。
 
-- `HandleReviewRequestMessageAsync(...)` 先把 session 节点推进到 `DbConfigHumanReviewGateExecutor`
-- `ExecuteReviewGateAsync(...)` 再把 runtime 侧审计和 review task 持久化补齐
+## 9. recovery 链路
 
-创建时会写入：
-
-- `workflow_review_tasks`
-- `workflow_node_executions` 中一个 `WaitingForReview` 的 gate 节点
-- `workflow_events.review.requested`
-- `workflow_sessions.ActiveReviewTaskId`
-- `workflow_sessions.EngineCheckpointRef`
-
-### 5.2 review submit 为什么不能直接跳过 runtime
-
-因为 review submit 不只是“改个状态”，还要：
-
-- 校验当前 session 仍允许恢复
-- 把 review 决策喂回 MAF `RequestPort`
-- 生成最终 completion / cancel
-- 收敛 node execution / event / checkpoint / final result
-
-所以 `POST /api/reviews/{taskId}/submit` 一定会再进 runtime。
-
-### 5.3 已取消 workflow 为什么不能再提交 review
-
-cancel 后 runtime 会：
-
-- 关闭活跃 review task
-- 清空 `ActiveReviewTaskId`
-- 把 session 置为 `Cancelled`
-
-`WorkflowReviewService.SubmitAsync(...)` 会再次检查 session 状态，`Cancelled / Failed / Completed` 一律拒绝提交，避免 stale review 再次驱动恢复。
-
-## 6. recovery 链路
-
-recovery 入口不是前端 API，而是：
+recovery 入口来自：
 
 - `WorkflowRecoveryHostedService`
 
@@ -244,35 +309,31 @@ WorkflowRecoveryHostedService
     -> RunRecoveryAsync
 ```
 
-### 6.1 有 checkpoint 的恢复
+### 9.1 有 checkpoint 的恢复
 
 如果 `workflow_sessions.EngineCheckpointRef` 存在：
 
-- runtime 先把 session 标成 `Recovering`
-- 写 `workflow.recovered`
-- 调 `ExecuteMafRecoveryGraphAsync(...)`
-- 根据输出回到：
-  - `WaitingForReview`
-  - `Completed`
-  - `Cancelled`
+1. session 先标记为 `Recovering`
+2. 记录 `workflow.recovered`
+3. 从 `ExecuteMafRecoveryGraphAsync(...)` 恢复 graph
+4. 根据输出回到 `WaitingForReview`、`Completed` 或 `Cancelled`
 
-### 6.2 无 checkpoint 的启动期恢复
+### 9.2 无 checkpoint 的启动期恢复
 
-如果 session 是 `Running / Recovering`，但还没有 `EngineCheckpointRef`：
+如果 session 已是 `Running / Recovering`，但还没有 checkpoint：
 
-- runtime 从 `InputPayloadJson` 反序列化出 `DbConfigWorkflowCommand`
-- 记录一次 `workflow.recovered`，标记 `recoveryMode = restart-start`
-- 重新进入 `ExecuteStartSessionAsync(...)`
+1. runtime 从 `InputPayloadJson` 反序列化 `DbConfigWorkflowCommand`
+2. 复用原 command 中已持久化的 bundle/version/skill selection
+3. 记录 `workflow.recovered`，标记 `recoveryMode = restart-start`
+4. 重新进入 `ExecuteStartSessionAsync(...)`
 
-这条分支是为了覆盖：
+这条分支用于覆盖：
 
-- session 已建好
-- 后台 graph 还没跑到首个 checkpoint
-- 进程就重启 / 崩溃
+- session 已创建
+- 后台 graph 还没走到首个 checkpoint
+- 进程重启或崩溃
 
-以前这里会直接失败；现在可以从启动阶段继续。
-
-## 7. cancel 链路
+## 10. cancel 语义
 
 cancel 入口：
 
@@ -285,103 +346,88 @@ WorkflowsApi
   -> IDbConfigOptimizationWorkflowService.CancelAsync
     -> IWorkflowRuntime.CancelAsync
       -> IWorkflowExecutionRegistry.TryCancel
-      -> session / review / node execution / checkpoint update
+      -> 更新 session / review / node execution / checkpoint
 ```
 
-### 7.1 cancel 现在做了什么
-
-`CancelAsync(...)` 现在会做两类动作：
+cancel 现在同时做两层保护：
 
 1. 运行时级别
-
-- 找到该 `sessionId` 对应的后台执行
-- 触发其 `CancellationTokenSource`
-
+   触发该 session 对应后台任务的 `CancellationTokenSource`。
 2. 控制面级别
+   把 session 持久化为 `Cancelled`，关闭 pending review，补 checkpoint，并阻止后续结果把状态覆写回 `Completed` 或 `WaitingForReview`。
 
-- `workflow_sessions.Status = Cancelled`
-- 关闭 pending review task
-- 收敛 `WaitingForReview` 节点
-- 写 `workflow.cancelled`
-- 补一条 checkpoint
+这就是“最佳努力停止”的真实含义：
 
-### 7.2 为什么叫“最佳努力停止”
+- 已经发出的外部调用不一定能被立刻杀掉
+- 但返回后的结果不能再把 session 状态污染回成功态
 
-因为已经发出去的单次外部调用不一定能被立刻强杀，例如：
+## 11. 持久化投影
 
-- 某个 MCP tool 已经开始执行
-- 某次模型调用已经发出
-
-当前实现保证的是：
-
-- 尽量中断后续节点
-- 即使外部调用自然返回，也不能再把 session 覆盖成 `Completed / WaitingForReview`
-
-这靠两层保护实现：
-
-- active execution token
-- runtime 写终态前的 cancel guard
-
-## 8. 控制面持久化表职责
-
-workflow 相关表不要混着理解：
+workflow 相关表的职责如下：
 
 - `workflow_sessions`
-  主会话表，对前端状态查询最重要。
+  面向前端查询的主会话表。
 - `workflow_checkpoints`
-  保存 checkpoint 快照与恢复引用。
+  保存 MAF checkpoint 快照与恢复引用。
 - `workflow_review_tasks`
-  保存人审任务、恢复关联和最终决定。
+  保存 review 任务、决策与 checkpoint 关联。
 - `workflow_node_executions`
-  保存每个节点的输入输出和执行状态。
+  保存每个节点的输入、输出、状态与错误。
 - `workflow_events`
-  保存时间线事件，SSE 和 replay 主要依赖它。
+  保存 timeline 事件，SSE 和 replay 依赖它。
 - `mcp_tool_executions`
-  保存 workflow 采集过程中真实发生的 MCP 工具调用审计。
+  保存真实 MCP 工具调用审计。
 - `agent_sessions / agent_messages / agent_summaries`
-  保存 diagnosis agent 的恢复上下文和可读摘要。
+  保存 diagnosis agent 的上下文与摘要。
 
-一个实用记法：
+## 12. state、checkpoint 与 skill selection
 
-- “当前状态”看 `workflow_sessions`
-- “怎么恢复”看 `workflow_checkpoints`
-- “为什么卡住”看 `workflow_review_tasks`
-- “哪个节点做了什么”看 `workflow_node_executions`
-- “时间线怎么播”看 `workflow_events`
+当前 runtime 会把显式 skill 选择持续写入多个持久化面：
 
-## 9. SSE 与 history 为什么能拿到数据
+- `workflow_sessions.InputPayloadJson`
+- `workflow_sessions.StateJson`
+- `workflow_checkpoints.SnapshotJson`
 
-### 9.1 SSE
+其中至少包含：
+
+- `bundleId`
+- `bundleVersion`
+- `investigationSkillId`
+- `investigationSkillVersion`
+- `diagnosisSkillId`
+- `diagnosisSkillVersion`
+- `skillSelection`
+
+因此 start、resume、recovery、history 和 checkpoint 都能追溯“本次到底用了哪套规则”。
+
+## 13. SSE 与 history 为什么能稳定回放
+
+### 13.1 SSE
 
 SSE 入口：
 
 - `GET /api/workflows/{sessionId}/events`
 
-它不是直接订阅 graph，而是轮询控制面库中的 `workflow_events`，并在首帧拼一个 session snapshot。
+SSE 读取的是控制面事件投影，而不是直接偷窥 graph 内存状态，所以：
 
-所以 SSE 的事实来源是：
+- 前端能在断线后重新拉历史事件
+- 恢复后仍能看到同一 session 的完整 timeline
+- review / recovery / cancel 也能和 start 阶段使用同一套事件来源
 
-- snapshot：`workflow_sessions`
-- backlog / heartbeat / replay：`workflow_events`
+### 13.2 history detail
 
-### 9.2 history
+history detail 来自：
 
-history 入口：
+- `workflow_sessions`
+- `workflow_node_executions`
+- `mcp_tool_executions`
+- `workflow_review_tasks`
 
-- `GET /api/history`
-- `GET /api/history/{sessionId}`
+因此它能同时展示：
 
-history detail 之所以能同时看到结果、node、tool、review，是因为 runtime 在每条主路径上都把这些投影写回控制面库，而不是只把最终结果存一份。
+- 当前状态和最终结果
+- 每个节点的执行输入 / 输出
+- MCP 工具调用审计
+- review 决策记录
 
-## 10. 与前端协作时最重要的几个语义
-
-前端最依赖下面这些稳定语义：
-
-- workflow 创建后会立即拿到 `sessionId`
-- 真实进度状态来自 `workflow_sessions + workflow_events`
-- `WaitingForReview` 一定伴随 `ActiveReviewTaskId`
-- cancel 后 session 不会再回写成 `Completed`
-- 已取消 workflow 的 review 不能再次提交
-- recovery 可以覆盖 checkpoint 恢复和启动阶段重试恢复两条路径
-
-如果后续要改 runtime，最需要保护的也是这几条。
+换句话说，前端看到的“状态、回放、历史详情”都来自持久化投影，而不是临时内存对象。

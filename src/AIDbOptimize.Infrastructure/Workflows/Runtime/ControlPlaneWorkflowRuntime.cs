@@ -11,6 +11,7 @@ using AIDbOptimize.Infrastructure.Persistence;
 using AIDbOptimize.Infrastructure.Persistence.Entities;
 using AIDbOptimize.Infrastructure.Workflows.Pipeline;
 using AIDbOptimize.Infrastructure.Workflows.Services;
+using AIDbOptimize.Infrastructure.Workflows.Skills;
 using Microsoft.Agents.AI.Workflows;
 using Microsoft.EntityFrameworkCore;
 
@@ -22,8 +23,10 @@ namespace AIDbOptimize.Infrastructure.Workflows.Runtime;
 public sealed class ControlPlaneWorkflowRuntime(
     IDbContextFactory<ControlPlaneDbContext> dbContextFactory,
     DbConfigInputValidationExecutor inputValidationExecutor,
-    DbConfigSnapshotCollectorExecutor snapshotCollectorExecutor,
-    DbConfigRuleAnalysisExecutor ruleAnalysisExecutor,
+    WorkflowSkillResolver workflowSkillResolver,
+    InvestigationPlanner investigationPlanner,
+    EvidenceCollectionSubworkflow evidenceCollectionSubworkflow,
+    SkillPolicyGate skillPolicyGate,
     IDbConfigDiagnosisAgentExecutor diagnosisAgentExecutor,
     RecommendationSchemaValidator schemaValidator,
     DbConfigGroundingExecutor groundingExecutor,
@@ -322,6 +325,7 @@ public sealed class ControlPlaneWorkflowRuntime(
             session.ResultPayloadJson = graphResult.Grounded?.ReportJson
                 ?? reviewPayload?.PayloadJson
                 ?? persistedDiagnosis?.ReportJson
+                ?? graphResult.Completion?.ResultPayloadJson
                 ?? session.ResultPayloadJson;
             session.AgentSessionId = graphResult.Grounded?.AgentSessionId
                 ?? reviewPayload?.AgentSessionId
@@ -334,9 +338,13 @@ public sealed class ControlPlaneWorkflowRuntime(
                     : persistedDiagnosis is not null
                         ? ExtractTokenCount(persistedDiagnosis.TokenUsageJson)
                         : session.TotalTokens;
-            session.CurrentNodeKey = graphResult.RequestInfo is null
-                ? "DbConfigGroundingExecutor"
-                : "DbConfigHumanReviewGateExecutor";
+            session.CurrentNodeKey = graphResult.RequestInfo is not null
+                ? "DbConfigHumanReviewGateExecutor"
+                : graphResult.Grounded is not null || persistedDiagnosis is not null
+                    ? "DbConfigGroundingExecutor"
+                    : graphResult.Completion is not null
+                        ? "DbConfigPolicyBlockedCompletionExecutor"
+                        : session.CurrentNodeKey;
             session.EngineCheckpointRef ??= graphResult.LastCheckpointRef;
             session.UpdatedAt = DateTimeOffset.UtcNow;
             UpdateStateJson(session, new
@@ -375,9 +383,32 @@ public sealed class ControlPlaneWorkflowRuntime(
 
             if (graphResult.Completion is null)
             {
-                if (graphResult.Grounded is null && persistedDiagnosis is null)
+                var hasPersistedReport = !string.IsNullOrWhiteSpace(session.ResultPayloadJson) &&
+                    !string.Equals(session.ResultPayloadJson, "{}", StringComparison.Ordinal);
+                if (graphResult.Grounded is null && persistedDiagnosis is null && !hasPersistedReport)
                 {
-                    throw new InvalidOperationException("MAF graph finished without a completion output.");
+                    var latestExecution = await dbContext.WorkflowNodeExecutions
+                        .AsNoTracking()
+                        .Where(x => x.WorkflowSessionId == session.Id)
+                        .OrderByDescending(x => x.CreatedAt)
+                        .Select(x => new
+                        {
+                            x.NodeKey,
+                            Status = x.Status.ToString(),
+                            OutputLength = x.OutputPayloadJson == null ? 0 : x.OutputPayloadJson.Length,
+                            x.ErrorMessage
+                        })
+                        .FirstOrDefaultAsync(cancellationToken);
+                    if (latestExecution is not null &&
+                        string.Equals(latestExecution.Status, WorkflowNodeExecutionStatus.Failed.ToString(), StringComparison.OrdinalIgnoreCase) &&
+                        !string.IsNullOrWhiteSpace(latestExecution.ErrorMessage))
+                    {
+                        throw new InvalidOperationException(
+                            $"MAF 节点执行失败：{latestExecution.NodeKey}。{latestExecution.ErrorMessage}");
+                    }
+
+                    throw new InvalidOperationException(
+                        $"MAF graph finished without a completion output. RunStatus={graphResult.RunStatus}, CurrentNode={session.CurrentNodeKey}, AgentSessionId={session.AgentSessionId}, ResultPayloadJsonLength={session.ResultPayloadJson?.Length ?? 0}, LatestNode={latestExecution?.NodeKey}, LatestNodeStatus={latestExecution?.Status}, LatestNodeOutputLength={latestExecution?.OutputLength}, LatestNodeError={latestExecution?.ErrorMessage}.");
                 }
 
                 graphResult = graphResult with
@@ -688,6 +719,27 @@ public sealed class ControlPlaneWorkflowRuntime(
 
         if (graphResult.Completion is null)
         {
+            var hasPersistedReport = !string.IsNullOrWhiteSpace(session.ResultPayloadJson) &&
+                !string.Equals(session.ResultPayloadJson, "{}", StringComparison.Ordinal);
+            if (hasPersistedReport)
+            {
+                graphResult = graphResult with
+                {
+                    Completion = new MafCompletionMessage(
+                        session.Id,
+                        session.ResultPayloadJson,
+                        false,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null)
+                };
+            }
+        }
+
+        if (graphResult.Completion is null)
+        {
             var pendingReviewTask = await dbContext.WorkflowReviewTasks
                 .Where(x => x.WorkflowSessionId == session.Id && x.Status == WorkflowReviewTaskStatus.Pending)
                 .OrderByDescending(x => x.CreatedAt)
@@ -712,7 +764,8 @@ public sealed class ControlPlaneWorkflowRuntime(
                 return await BuildDetailAsync(dbContext, session.Id, cancellationToken);
             }
 
-            throw new InvalidOperationException("MAF recovery finished without a completion or pending request.");
+            throw new InvalidOperationException(
+                $"MAF recovery finished without a completion or pending request. RunStatus={graphResult.RunStatus}, CurrentNode={session.CurrentNodeKey}, AgentSessionId={session.AgentSessionId}, ResultPayloadJsonLength={session.ResultPayloadJson?.Length ?? 0}.");
         }
 
         session.ResultPayloadJson = string.IsNullOrWhiteSpace(graphResult.Completion.ResultPayloadJson)
@@ -892,18 +945,32 @@ public sealed class ControlPlaneWorkflowRuntime(
         var validationExecutor = new FunctionExecutor<MafWorkflowStartMessage, MafValidatedMessage>(
             "DbConfigInputValidationExecutor",
             (message, context, ct) => HandleValidationMessageAsync(message, ct));
-        var snapshotExecutor = new FunctionExecutor<MafValidatedMessage, MafSnapshotMessage>(
-            "DbConfigSnapshotCollectorExecutor",
-            (message, context, ct) => HandleSnapshotMessageAsync(message, ct));
-        var ruleExecutor = new FunctionExecutor<MafSnapshotMessage, MafEvidenceMessage>(
-            "DbConfigRuleAnalysisExecutor",
-            (message, context, ct) => HandleRuleAnalysisMessageAsync(message, ct));
-        var diagnosisExecutor = new FunctionExecutor<MafEvidenceMessage, MafDiagnosisMessage>(
+        var plannerExecutor = new FunctionExecutor<MafValidatedMessage, MafInvestigationPlanMessage>(
+            "InvestigationPlanner",
+            (message, context, ct) => HandleInvestigationPlanningMessageAsync(message, ct));
+        var collectionExecutor = new FunctionExecutor<MafInvestigationPlanMessage, MafCollectedEvidenceMessage>(
+            "EvidenceCollectionSubworkflow",
+            (message, context, ct) => HandleEvidenceCollectionMessageAsync(message, ct));
+        var policyGateExecutor = new FunctionExecutor<MafCollectedEvidenceMessage, MafPolicyMessage>(
+            "SkillPolicyGate",
+            (message, context, ct) => HandlePolicyGateMessageAsync(message, ct));
+        var diagnosisExecutor = new FunctionExecutor<MafPolicyMessage, MafDiagnosisMessage>(
             "DbConfigDiagnosisAgentExecutor",
             (message, context, ct) => HandleDiagnosisMessageAsync(message, ct));
         var groundingExecutorBinding = new FunctionExecutor<MafDiagnosisMessage, MafGroundedMessage>(
             "DbConfigGroundingExecutor",
             (message, context, ct) => HandleGroundingMessageAsync(message, ct));
+        var blockedCompletionExecutor = new FunctionExecutor<MafPolicyMessage, MafCompletionMessage>(
+            "DbConfigPolicyBlockedCompletionExecutor",
+            (message, context, ct) => ValueTask.FromResult(new MafCompletionMessage(
+                message.SessionId,
+                message.BlockedReportJson,
+                false,
+                null,
+                null,
+                null,
+                null,
+                null)));
         var reviewRequestExecutor = new FunctionExecutor<MafGroundedMessage, MafReviewRequest>(
             "DbConfigHumanReviewGateExecutor",
             (message, context, ct) => HandleReviewRequestMessageAsync(message, ct));
@@ -932,10 +999,12 @@ public sealed class ControlPlaneWorkflowRuntime(
                 response.AdjustmentsJson)));
 
         var startBinding = validationExecutor.BindExecutor();
-        var snapshotBinding = snapshotExecutor.BindExecutor();
-        var ruleBinding = ruleExecutor.BindExecutor();
+        var plannerBinding = plannerExecutor.BindExecutor();
+        var collectionBinding = collectionExecutor.BindExecutor();
+        var policyGateBinding = policyGateExecutor.BindExecutor();
         var diagnosisBinding = diagnosisExecutor.BindExecutor();
         var groundingBinding = groundingExecutorBinding.BindExecutor();
+        var blockedCompletionBinding = blockedCompletionExecutor.BindExecutor();
         var reviewRequestBinding = reviewRequestExecutor.BindExecutor();
         var directCompletionBinding = directCompletionExecutor.BindExecutor();
         var reviewPortBinding = reviewPort.BindAsExecutor(false);
@@ -944,15 +1013,17 @@ public sealed class ControlPlaneWorkflowRuntime(
         return new WorkflowBuilder(startBinding)
             .WithName("DbConfigOptimization")
             .WithDescription("Database configuration optimization workflow")
-            .AddEdge(startBinding, snapshotBinding)
-            .AddEdge(snapshotBinding, ruleBinding)
-            .AddEdge(ruleBinding, diagnosisBinding)
+            .AddEdge(startBinding, plannerBinding)
+            .AddEdge(plannerBinding, collectionBinding)
+            .AddEdge(collectionBinding, policyGateBinding)
+            .AddEdge<MafPolicyMessage>(policyGateBinding, diagnosisBinding, message => message?.GateDecision != SkillPolicyDecision.Blocked)
+            .AddEdge<MafPolicyMessage>(policyGateBinding, blockedCompletionBinding, message => message?.GateDecision == SkillPolicyDecision.Blocked)
             .AddEdge(diagnosisBinding, groundingBinding)
             .AddEdge<MafGroundedMessage>(groundingBinding, reviewRequestBinding, message => message?.Command?.RequireHumanReview == true)
             .AddEdge<MafGroundedMessage>(groundingBinding, directCompletionBinding, message => message?.Command?.RequireHumanReview != true)
             .AddEdge(reviewRequestBinding, reviewPortBinding)
             .AddEdge(reviewPortBinding, reviewResponseBinding)
-            .WithOutputFrom(directCompletionBinding, reviewResponseBinding)
+            .WithOutputFrom(blockedCompletionBinding, directCompletionBinding, reviewResponseBinding)
             .Build();
     }
 
@@ -1053,7 +1124,7 @@ public sealed class ControlPlaneWorkflowRuntime(
         return new MafValidatedMessage(message.SessionId, message.Command);
     }
 
-    private async ValueTask<MafSnapshotMessage> HandleSnapshotMessageAsync(
+    private async ValueTask<MafInvestigationPlanMessage> HandleInvestigationPlanningMessageAsync(
         MafValidatedMessage message,
         CancellationToken cancellationToken)
     {
@@ -1065,25 +1136,13 @@ public sealed class ControlPlaneWorkflowRuntime(
             .AsNoTracking()
             .SingleAsync(x => x.Id == session.ConnectionId, cancellationToken);
         var sequence = await GetNextEventSequenceAsync(dbContext, session.Id, cancellationToken);
-        var snapshot = await ExecuteSnapshotCollectionAsync(dbContext, session, connection, sequence, Activity.Current, cancellationToken);
-        return new MafSnapshotMessage(message.SessionId, message.Command, snapshot);
+        var resolution = ResolveWorkflowSkills(connection, message.Command);
+        var plan = await ExecuteInvestigationPlanningAsync(dbContext, session, resolution, sequence, cancellationToken);
+        return new MafInvestigationPlanMessage(message.SessionId, message.Command, plan);
     }
 
-    private async ValueTask<MafEvidenceMessage> HandleRuleAnalysisMessageAsync(
-        MafSnapshotMessage message,
-        CancellationToken cancellationToken)
-    {
-        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-        var session = await dbContext.WorkflowSessions
-            .SingleAsync(x => x.Id == message.SessionId, cancellationToken);
-        await ThrowIfWorkflowCancellationRequestedAsync(dbContext, session.Id, cancellationToken);
-        var sequence = await GetNextEventSequenceAsync(dbContext, session.Id, cancellationToken);
-        var evidence = await ExecuteRuleAnalysisAsync(dbContext, session, message.Snapshot, sequence, cancellationToken);
-        return new MafEvidenceMessage(message.SessionId, message.Command, evidence);
-    }
-
-    private async ValueTask<MafDiagnosisMessage> HandleDiagnosisMessageAsync(
-        MafEvidenceMessage message,
+    private async ValueTask<MafCollectedEvidenceMessage> HandleEvidenceCollectionMessageAsync(
+        MafInvestigationPlanMessage message,
         CancellationToken cancellationToken)
     {
         await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
@@ -1094,7 +1153,77 @@ public sealed class ControlPlaneWorkflowRuntime(
             .AsNoTracking()
             .SingleAsync(x => x.Id == session.ConnectionId, cancellationToken);
         var sequence = await GetNextEventSequenceAsync(dbContext, session.Id, cancellationToken);
-        var diagnosis = await ExecuteDiagnosisAsync(dbContext, session, connection, message.Evidence, message.Command.Notes, sequence, cancellationToken);
+        var collection = await ExecuteEvidenceCollectionAsync(
+            dbContext,
+            session,
+            connection,
+            message.Plan,
+            sequence,
+            Activity.Current,
+            cancellationToken);
+        return new MafCollectedEvidenceMessage(
+            message.SessionId,
+            message.Command,
+            message.Plan,
+            collection.Evidence,
+            collection.Summary);
+    }
+
+    private async ValueTask<MafPolicyMessage> HandlePolicyGateMessageAsync(
+        MafCollectedEvidenceMessage message,
+        CancellationToken cancellationToken)
+    {
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var session = await dbContext.WorkflowSessions
+            .SingleAsync(x => x.Id == message.SessionId, cancellationToken);
+        await ThrowIfWorkflowCancellationRequestedAsync(dbContext, session.Id, cancellationToken);
+        var connection = await dbContext.McpConnections
+            .AsNoTracking()
+            .SingleAsync(x => x.Id == session.ConnectionId, cancellationToken);
+        var resolution = ResolveWorkflowSkills(connection, message.Command);
+        var sequence = await GetNextEventSequenceAsync(dbContext, session.Id, cancellationToken);
+        var gate = await ExecuteSkillPolicyGateAsync(
+            dbContext,
+            session,
+            resolution.Investigation,
+            resolution.Diagnosis,
+            message.Plan,
+            message.Summary,
+            message.Evidence,
+            sequence,
+            cancellationToken);
+        return new MafPolicyMessage(
+            message.SessionId,
+            message.Command,
+            message.Plan,
+            gate.Evidence,
+            message.Summary,
+            gate.Decision,
+            gate.BlockedReportJson);
+    }
+
+    private async ValueTask<MafDiagnosisMessage> HandleDiagnosisMessageAsync(
+        MafPolicyMessage message,
+        CancellationToken cancellationToken)
+    {
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var session = await dbContext.WorkflowSessions
+            .SingleAsync(x => x.Id == message.SessionId, cancellationToken);
+        await ThrowIfWorkflowCancellationRequestedAsync(dbContext, session.Id, cancellationToken);
+        var connection = await dbContext.McpConnections
+            .AsNoTracking()
+            .SingleAsync(x => x.Id == session.ConnectionId, cancellationToken);
+        var resolution = ResolveWorkflowSkills(connection, message.Command);
+        var sequence = await GetNextEventSequenceAsync(dbContext, session.Id, cancellationToken);
+        var diagnosis = await ExecuteDiagnosisAsync(
+            dbContext,
+            session,
+            connection,
+            resolution.Diagnosis,
+            message.Evidence,
+            message.Command.Notes,
+            sequence,
+            cancellationToken);
         return new MafDiagnosisMessage(
             message.SessionId,
             message.Command,
@@ -1178,6 +1307,14 @@ public sealed class ControlPlaneWorkflowRuntime(
 
         var execution = CreateNodeExecution(session.Id, "DbConfigInputValidationExecutor", "deterministic", inputJson);
         dbContext.WorkflowNodeExecutions.Add(execution);
+        session.CurrentNodeKey = execution.NodeKey;
+        session.UpdatedAt = DateTimeOffset.UtcNow;
+        UpdateStateJson(session, new
+        {
+            sessionId = session.Id,
+            status = PublicStatus(session.Status),
+            currentNode = session.CurrentNodeKey
+        });
         AppendEvent(dbContext, session.Id, ref nextSequence, WorkflowEventType.ExecutorStarted, "executor.started", new
         {
             nodeName = execution.NodeKey
@@ -1206,31 +1343,93 @@ public sealed class ControlPlaneWorkflowRuntime(
         await dbContext.SaveChangesAsync(cancellationToken);
     }
 
-    private async Task<DbConfigSnapshot> ExecuteSnapshotCollectionAsync(
+    private async Task<InvestigationPlan> ExecuteInvestigationPlanningAsync(
+        ControlPlaneDbContext dbContext,
+        WorkflowSessionEntity session,
+        WorkflowSkillResolution resolution,
+        long nextSequence,
+        CancellationToken cancellationToken)
+    {
+        var inputJson = JsonSerializer.Serialize(new
+        {
+            resolution.Bundle.BundleId,
+            resolution.Bundle.BundleVersion,
+            InvestigationSkill = resolution.Investigation.SkillId,
+            resolution.Investigation.Version
+        }, SerializerOptions);
+        var execution = CreateNodeExecution(session.Id, "InvestigationPlanner", "deterministic", inputJson);
+        dbContext.WorkflowNodeExecutions.Add(execution);
+        session.CurrentNodeKey = execution.NodeKey;
+        session.UpdatedAt = DateTimeOffset.UtcNow;
+        UpdateStateJson(session, new
+        {
+            sessionId = session.Id,
+            status = PublicStatus(session.Status),
+            currentNode = session.CurrentNodeKey
+        });
+        AppendEvent(dbContext, session.Id, ref nextSequence, WorkflowEventType.ExecutorStarted, "executor.started", new
+        {
+            nodeName = execution.NodeKey
+        }, "Investigation planning started.", execution.Id);
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        var plan = investigationPlanner.BuildPlan(resolution.Bundle, resolution.Investigation);
+
+        CompleteNodeExecution(execution, JsonSerializer.Serialize(plan, SerializerOptions));
+        session.CurrentNodeKey = execution.NodeKey;
+        session.UpdatedAt = DateTimeOffset.UtcNow;
+        UpdateStateJson(session, new
+        {
+            sessionId = session.Id,
+            status = PublicStatus(session.Status),
+            currentNode = session.CurrentNodeKey,
+            planId = plan.PlanId
+        });
+        AppendEvent(dbContext, session.Id, ref nextSequence, WorkflowEventType.ExecutorCompleted, "executor.completed", new
+        {
+            nodeName = execution.NodeKey,
+            planId = plan.PlanId,
+            plannedEvidenceCount = plan.Steps.Count
+        }, "Investigation planning completed.", execution.Id);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return plan;
+    }
+
+    private async Task<EvidenceCollectionSubworkflowResult> ExecuteEvidenceCollectionAsync(
         ControlPlaneDbContext dbContext,
         WorkflowSessionEntity session,
         McpConnectionEntity connection,
+        InvestigationPlan plan,
         long nextSequence,
         Activity? activity,
         CancellationToken cancellationToken)
     {
-        var execution = CreateNodeExecution(session.Id, "DbConfigSnapshotCollectorExecutor", "deterministic", """{}""");
+        var execution = CreateNodeExecution(session.Id, "EvidenceCollectionSubworkflow", "deterministic", JsonSerializer.Serialize(plan, SerializerOptions));
         dbContext.WorkflowNodeExecutions.Add(execution);
+        session.CurrentNodeKey = execution.NodeKey;
+        session.UpdatedAt = DateTimeOffset.UtcNow;
+        UpdateStateJson(session, new
+        {
+            sessionId = session.Id,
+            status = PublicStatus(session.Status),
+            currentNode = session.CurrentNodeKey
+        });
         AppendEvent(dbContext, session.Id, ref nextSequence, WorkflowEventType.ExecutorStarted, "executor.started", new
         {
             nodeName = execution.NodeKey
-        }, "Snapshot collection started.", execution.Id);
+        }, "Evidence collection subworkflow started.", execution.Id);
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        var snapshot = await snapshotCollectorExecutor.CollectAsync(
+        var collection = await evidenceCollectionSubworkflow.ExecuteAsync(
             connection,
             session.Id,
             execution.NodeKey,
             session.RequestedBy,
             activity?.TraceId.ToString(),
+            plan,
             cancellationToken);
 
-        CompleteNodeExecution(execution, JsonSerializer.Serialize(snapshot, SerializerOptions));
+        CompleteNodeExecution(execution, JsonSerializer.Serialize(collection, SerializerOptions));
         session.CurrentNodeKey = execution.NodeKey;
         session.UpdatedAt = DateTimeOffset.UtcNow;
         UpdateStateJson(session, new
@@ -1238,199 +1437,278 @@ public sealed class ControlPlaneWorkflowRuntime(
             sessionId = session.Id,
             status = PublicStatus(session.Status),
             currentNode = session.CurrentNodeKey,
-            snapshotSource = snapshot.Source
+            collectedEvidenceCount = collection.Summary.CollectedEvidenceCount
         });
         AppendEvent(dbContext, session.Id, ref nextSequence, WorkflowEventType.ExecutorCompleted, "executor.completed", new
         {
             nodeName = execution.NodeKey,
-            snapshotSource = snapshot.Source
-        }, "Snapshot collection completed.", execution.Id);
+            planId = collection.Summary.PlanId,
+            collectedEvidenceCount = collection.Summary.CollectedEvidenceCount,
+            missingRequiredEvidenceCount = collection.Summary.MissingRequiredEvidenceRefs.Count
+        }, "Evidence collection subworkflow completed.", execution.Id);
         nextSequence = await LinkLatestToolExecutionAsync(dbContext, session.Id, execution.Id, nextSequence, cancellationToken);
         await dbContext.SaveChangesAsync(cancellationToken);
-        return snapshot;
+        return collection;
     }
 
-    private async Task<DbConfigEvidencePack> ExecuteRuleAnalysisAsync(
+    private async Task<SkillPolicyDecisionResult> ExecuteSkillPolicyGateAsync(
         ControlPlaneDbContext dbContext,
         WorkflowSessionEntity session,
-        DbConfigSnapshot snapshot,
+        InvestigationSkillDefinition skill,
+        DiagnosisSkillDefinition diagnosisSkill,
+        InvestigationPlan plan,
+        CollectionExecutionSummary summary,
+        DbConfigEvidencePack evidence,
         long nextSequence,
         CancellationToken cancellationToken)
     {
-        var execution = CreateNodeExecution(session.Id, "DbConfigRuleAnalysisExecutor", "deterministic", JsonSerializer.Serialize(snapshot, SerializerOptions));
-        dbContext.WorkflowNodeExecutions.Add(execution);
-        AppendEvent(dbContext, session.Id, ref nextSequence, WorkflowEventType.ExecutorStarted, "executor.started", new
+        evidence = AttachDiagnosisMetadata(evidence, diagnosisSkill);
+        var inputJson = JsonSerializer.Serialize(new
         {
-            nodeName = execution.NodeKey
-        }, "Rule analysis started.", execution.Id);
-        await dbContext.SaveChangesAsync(cancellationToken);
-
-        var evidence = ruleAnalysisExecutor.Analyze(snapshot);
-
-        CompleteNodeExecution(execution, JsonSerializer.Serialize(evidence, SerializerOptions));
+            plan,
+            summary,
+            evidence
+        }, SerializerOptions);
+        var execution = CreateNodeExecution(session.Id, "SkillPolicyGate", "gate", inputJson);
+        dbContext.WorkflowNodeExecutions.Add(execution);
         session.CurrentNodeKey = execution.NodeKey;
         session.UpdatedAt = DateTimeOffset.UtcNow;
         UpdateStateJson(session, new
         {
             sessionId = session.Id,
             status = PublicStatus(session.Status),
+            currentNode = session.CurrentNodeKey
+        });
+        AppendEvent(dbContext, session.Id, ref nextSequence, WorkflowEventType.ExecutorStarted, "executor.started", new
+        {
+            nodeName = execution.NodeKey
+        }, "Skill policy gate started.", execution.Id);
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        var decision = skillPolicyGate.Evaluate(plan, skill, summary, evidence);
+
+        CompleteNodeExecution(execution, JsonSerializer.Serialize(decision, SerializerOptions));
+        session.CurrentNodeKey = execution.NodeKey;
+        session.UpdatedAt = DateTimeOffset.UtcNow;
+        session.ResultPayloadJson = decision.Decision == SkillPolicyDecision.Blocked
+            ? decision.BlockedReportJson
+            : session.ResultPayloadJson;
+        UpdateStateJson(session, new
+        {
+            sessionId = session.Id,
+            status = PublicStatus(session.Status),
             currentNode = session.CurrentNodeKey,
-            recommendationCount = evidence.Recommendations.Count
+            gateStatus = decision.Decision.ToString()
         });
         AppendEvent(dbContext, session.Id, ref nextSequence, WorkflowEventType.ExecutorCompleted, "executor.completed", new
         {
             nodeName = execution.NodeKey,
-            recommendationCount = evidence.Recommendations.Count
-        }, "Rule analysis completed.", execution.Id);
+            gateStatus = decision.Decision.ToString()
+        }, "Skill policy gate completed.", execution.Id);
         await dbContext.SaveChangesAsync(cancellationToken);
-        return evidence;
+        return decision;
     }
 
     private async Task<DiagnosisArtifacts> ExecuteDiagnosisAsync(
         ControlPlaneDbContext dbContext,
         WorkflowSessionEntity session,
         McpConnectionEntity connection,
+        DiagnosisSkillDefinition diagnosisSkill,
         DbConfigEvidencePack evidence,
         string? notes,
         long nextSequence,
         CancellationToken cancellationToken)
     {
+        evidence = AttachDiagnosisMetadata(evidence, diagnosisSkill);
         var prompt = diagnosisAgentExecutor.BuildPrompt(
             connection.DisplayName,
             connection.DatabaseName,
             connection.Engine.ToString(),
             notes ?? string.Empty,
-            evidence);
+            evidence,
+            diagnosisSkill);
 
         var execution = CreateNodeExecution(session.Id, "DbConfigDiagnosisAgentExecutor", "agent", JsonSerializer.Serialize(evidence, SerializerOptions));
         dbContext.WorkflowNodeExecutions.Add(execution);
-        AppendEvent(dbContext, session.Id, ref nextSequence, WorkflowEventType.ExecutorStarted, "executor.started", new
-        {
-            nodeName = execution.NodeKey
-        }, "Diagnosis agent started.", execution.Id);
-        await dbContext.SaveChangesAsync(cancellationToken);
-
-        var diagnosis = await diagnosisAgentExecutor.ExecuteAsync(evidence, notes, cancellationToken);
-        schemaValidator.Validate(diagnosis.ReportJson);
-
-        var agentSessionResult = await agentSessionPersistenceService.CreateSessionAsync(
-            new AgentSessionCreateRequest(
-                session.Id,
-                "DbConfigDiagnosisAgent",
-                diagnosisAgentExecutor.PromptVersion,
-                diagnosisAgentExecutor.ModelId,
-                JsonSerializer.Serialize(new
-                {
-                    prompt,
-                    report = diagnosis.ReportJson,
-                    evidenceSource = evidence.Source
-                }, SerializerOptions),
-                JsonSerializer.Serialize(new
-                {
-                    workflowSessionId = session.Id,
-                    connectionId = session.ConnectionId,
-                    databaseName = connection.DatabaseName
-                }, SerializerOptions),
-                DateTimeOffset.UtcNow),
-            cancellationToken);
-
-        await agentSessionPersistenceService.AppendMessageAsync(
-            new AgentMessageCreateRequest(
-                agentSessionResult.AgentSessionId,
-                session.Id,
-                1,
-                "system",
-                "PromptInput",
-                prompt,
-                JsonSerializer.Serialize(new { prompt }, SerializerOptions),
-                Activity.Current?.TraceId.ToString(),
-                DateTimeOffset.UtcNow),
-            cancellationToken);
-
-        await agentSessionPersistenceService.AppendMessageAsync(
-            new AgentMessageCreateRequest(
-                agentSessionResult.AgentSessionId,
-                session.Id,
-                2,
-                "assistant",
-                "FinalAnswer",
-                diagnosis.ReportJson,
-                diagnosis.ReportJson,
-                Activity.Current?.TraceId.ToString(),
-                DateTimeOffset.UtcNow),
-            cancellationToken);
-
-        var rollingSummaryJson = AgentSummaryService.BuildRollingSummaryJson(
-            "DbConfigOptimization",
-            connection.DatabaseName,
-            diagnosis.ReportJson,
-            notes,
-            messageCount: 2);
-        var summary = await agentSummaryService.CreateRollingSummaryAsync(
-            new AgentSummaryCreateRequest(
-                agentSessionResult.AgentSessionId,
-                "rolling",
-                rollingSummaryJson,
-                1,
-                2,
-                DateTimeOffset.UtcNow),
-            cancellationToken);
-
-        await agentSessionPersistenceService.AttachSummaryAsync(
-            agentSessionResult.AgentSessionId,
-            summary.SummaryId,
-            2,
-            DateTimeOffset.UtcNow,
-            JsonSerializer.Serialize(new
-            {
-                prompt,
-                report = diagnosis.ReportJson,
-                activeSummaryId = summary.SummaryId
-            }, SerializerOptions),
-            JsonSerializer.Serialize(new
-            {
-                workflowSessionId = session.Id,
-                latestReport = diagnosis.ReportJson
-            }, SerializerOptions),
-            cancellationToken);
-
-        execution.AgentSessionId = agentSessionResult.AgentSessionId;
-        execution.TokenUsageJson = diagnosis.TokenUsageJson;
-        CompleteNodeExecution(execution, diagnosis.ReportJson);
-
-        session.AgentSessionId = agentSessionResult.AgentSessionId;
-        session.ResultPayloadJson = diagnosis.ReportJson;
-        session.TotalTokens = ExtractTokenCount(diagnosis.TokenUsageJson);
         session.CurrentNodeKey = execution.NodeKey;
         session.UpdatedAt = DateTimeOffset.UtcNow;
         UpdateStateJson(session, new
         {
             sessionId = session.Id,
             status = PublicStatus(session.Status),
-            currentNode = session.CurrentNodeKey,
-            agentSessionId = session.AgentSessionId
+            currentNode = session.CurrentNodeKey
         });
-        AppendEvent(dbContext, session.Id, ref nextSequence, WorkflowEventType.ExecutorCompleted, "executor.completed", new
+        AppendEvent(dbContext, session.Id, ref nextSequence, WorkflowEventType.ExecutorStarted, "executor.started", new
         {
-            nodeName = execution.NodeKey,
-            agentSessionId = session.AgentSessionId
-        }, "Diagnosis agent completed.", execution.Id);
-        AppendEvent(dbContext, session.Id, ref nextSequence, WorkflowEventType.AgentReportReady, "agent.report.ready", new
-        {
-            sessionId = session.Id,
-            agentSessionId = session.AgentSessionId,
-            title = ExtractReportTitle(diagnosis.ReportJson),
-            summary = ExtractReportSummary(diagnosis.ReportJson),
-            recommendationCount = ExtractRecommendationCount(diagnosis.ReportJson)
-        }, "智能体结果已生成。", execution.Id);
+            nodeName = execution.NodeKey
+        }, "Diagnosis agent started.", execution.Id);
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        return new DiagnosisArtifacts(
-            diagnosis.ReportJson,
-            prompt,
-            agentSessionResult.AgentSessionId,
-            summary.SummaryId,
-            diagnosis.TokenUsageJson);
+        try
+        {
+            var diagnosis = await diagnosisAgentExecutor.ExecuteAsync(evidence, notes, diagnosisSkill, cancellationToken);
+            schemaValidator.Validate(diagnosis.ReportJson);
+
+            var agentSessionResult = await agentSessionPersistenceService.CreateSessionAsync(
+                new AgentSessionCreateRequest(
+                    session.Id,
+                    "DbConfigDiagnosisAgent",
+                    diagnosisAgentExecutor.PromptVersion,
+                    diagnosisAgentExecutor.ModelId,
+                    JsonSerializer.Serialize(new
+                    {
+                        prompt,
+                        report = diagnosis.ReportJson,
+                        evidenceSource = evidence.Source
+                    }, SerializerOptions),
+                    JsonSerializer.Serialize(new
+                    {
+                        workflowSessionId = session.Id,
+                        connectionId = session.ConnectionId,
+                        databaseName = connection.DatabaseName
+                    }, SerializerOptions),
+                    DateTimeOffset.UtcNow),
+                cancellationToken);
+
+            await agentSessionPersistenceService.AppendMessageAsync(
+                new AgentMessageCreateRequest(
+                    agentSessionResult.AgentSessionId,
+                    session.Id,
+                    1,
+                    "system",
+                    "PromptInput",
+                    prompt,
+                    JsonSerializer.Serialize(new { prompt }, SerializerOptions),
+                    Activity.Current?.TraceId.ToString(),
+                    DateTimeOffset.UtcNow),
+                cancellationToken);
+
+            await agentSessionPersistenceService.AppendMessageAsync(
+                new AgentMessageCreateRequest(
+                    agentSessionResult.AgentSessionId,
+                    session.Id,
+                    2,
+                    "assistant",
+                    "FinalAnswer",
+                    diagnosis.ReportJson,
+                    diagnosis.ReportJson,
+                    Activity.Current?.TraceId.ToString(),
+                    DateTimeOffset.UtcNow),
+                cancellationToken);
+
+            var rollingSummaryJson = AgentSummaryService.BuildRollingSummaryJson(
+                "DbConfigOptimization",
+                connection.DatabaseName,
+                diagnosis.ReportJson,
+                notes,
+                messageCount: 2);
+            var summary = await agentSummaryService.CreateRollingSummaryAsync(
+                new AgentSummaryCreateRequest(
+                    agentSessionResult.AgentSessionId,
+                    "rolling",
+                    rollingSummaryJson,
+                    1,
+                    2,
+                    DateTimeOffset.UtcNow),
+                cancellationToken);
+
+            await agentSessionPersistenceService.AttachSummaryAsync(
+                agentSessionResult.AgentSessionId,
+                summary.SummaryId,
+                2,
+                DateTimeOffset.UtcNow,
+                JsonSerializer.Serialize(new
+                {
+                    prompt,
+                    report = diagnosis.ReportJson,
+                    activeSummaryId = summary.SummaryId
+                }, SerializerOptions),
+                JsonSerializer.Serialize(new
+                {
+                    workflowSessionId = session.Id,
+                    latestReport = diagnosis.ReportJson
+                }, SerializerOptions),
+                cancellationToken);
+
+            execution.AgentSessionId = agentSessionResult.AgentSessionId;
+            execution.TokenUsageJson = diagnosis.TokenUsageJson;
+            CompleteNodeExecution(execution, diagnosis.ReportJson);
+
+            session.AgentSessionId = agentSessionResult.AgentSessionId;
+            session.ResultPayloadJson = diagnosis.ReportJson;
+            session.TotalTokens = ExtractTokenCount(diagnosis.TokenUsageJson);
+            session.CurrentNodeKey = execution.NodeKey;
+            session.UpdatedAt = DateTimeOffset.UtcNow;
+            UpdateStateJson(session, new
+            {
+                sessionId = session.Id,
+                status = PublicStatus(session.Status),
+                currentNode = session.CurrentNodeKey,
+                agentSessionId = session.AgentSessionId
+            });
+            AppendEvent(dbContext, session.Id, ref nextSequence, WorkflowEventType.ExecutorCompleted, "executor.completed", new
+            {
+                nodeName = execution.NodeKey,
+                agentSessionId = session.AgentSessionId
+            }, "Diagnosis agent completed.", execution.Id);
+            AppendEvent(dbContext, session.Id, ref nextSequence, WorkflowEventType.AgentReportReady, "agent.report.ready", new
+            {
+                sessionId = session.Id,
+                agentSessionId = session.AgentSessionId,
+                title = ExtractReportTitle(diagnosis.ReportJson),
+                summary = ExtractReportSummary(diagnosis.ReportJson),
+                recommendationCount = ExtractRecommendationCount(diagnosis.ReportJson)
+            }, "智能体结果已生成。", execution.Id);
+            await dbContext.SaveChangesAsync(cancellationToken);
+
+            return new DiagnosisArtifacts(
+                diagnosis.ReportJson,
+                prompt,
+                agentSessionResult.AgentSessionId,
+                summary.SummaryId,
+                diagnosis.TokenUsageJson);
+        }
+        catch (Exception ex)
+        {
+            // MAF graph 可能只暴露“没有 completion output”，这里先把真实节点错误落库。
+            FailNodeExecution(execution, ex.Message);
+            session.CurrentNodeKey = execution.NodeKey;
+            session.ErrorMessage = ex.Message;
+            session.UpdatedAt = DateTimeOffset.UtcNow;
+            UpdateStateJson(session, new
+            {
+                sessionId = session.Id,
+                status = PublicStatus(session.Status),
+                currentNode = session.CurrentNodeKey,
+                error = ex.Message
+            });
+            await dbContext.SaveChangesAsync(cancellationToken);
+            throw;
+        }
+    }
+
+    private static DbConfigEvidencePack AttachDiagnosisMetadata(
+        DbConfigEvidencePack evidence,
+        DiagnosisSkillDefinition diagnosisSkill)
+    {
+        var metadata = evidence.CollectionMetadata.ToList();
+        UpsertCollectionMetadata(metadata, "diagnosis_skill_id", diagnosisSkill.SkillId, "Resolved diagnosis skill id.");
+        UpsertCollectionMetadata(metadata, "diagnosis_skill_version", diagnosisSkill.Version, "Resolved diagnosis skill version.");
+
+        return new DbConfigEvidencePack(
+            evidence.Engine,
+            evidence.DatabaseName,
+            evidence.Source,
+            evidence.Recommendations,
+            evidence.EvidenceItems,
+            evidence.Warnings,
+            evidence.ConfigurationItems,
+            evidence.RuntimeMetricItems,
+            evidence.HostContextItems,
+            evidence.ObservabilityItems,
+            evidence.MissingContextItems,
+            metadata,
+            evidence.ExternalKnowledgeItems);
     }
 
     private async Task ExecuteGroundingAsync(
@@ -1443,6 +1721,14 @@ public sealed class ControlPlaneWorkflowRuntime(
     {
         var execution = CreateNodeExecution(session.Id, "DbConfigGroundingExecutor", "deterministic", reportJson);
         dbContext.WorkflowNodeExecutions.Add(execution);
+        session.CurrentNodeKey = execution.NodeKey;
+        session.UpdatedAt = DateTimeOffset.UtcNow;
+        UpdateStateJson(session, new
+        {
+            sessionId = session.Id,
+            status = PublicStatus(session.Status),
+            currentNode = session.CurrentNodeKey
+        });
         AppendEvent(dbContext, session.Id, ref nextSequence, WorkflowEventType.ExecutorStarted, "executor.started", new
         {
             nodeName = execution.NodeKey
@@ -1499,6 +1785,14 @@ public sealed class ControlPlaneWorkflowRuntime(
 
         var execution = CreateNodeExecution(session.Id, "DbConfigHumanReviewGateExecutor", "gate", session.ResultPayloadJson);
         dbContext.WorkflowNodeExecutions.Add(execution);
+        session.CurrentNodeKey = execution.NodeKey;
+        session.UpdatedAt = DateTimeOffset.UtcNow;
+        UpdateStateJson(session, new
+        {
+            sessionId = session.Id,
+            status = PublicStatus(session.Status),
+            currentNode = session.CurrentNodeKey
+        });
         AppendEvent(dbContext, session.Id, ref nextSequence, WorkflowEventType.ExecutorStarted, "executor.started", new
         {
             nodeName = execution.NodeKey
@@ -1578,6 +1872,14 @@ public sealed class ControlPlaneWorkflowRuntime(
 
         var execution = CreateNodeExecution(session.Id, "DbConfigCompletionExecutor", "projection", resultPayloadJson);
         dbContext.WorkflowNodeExecutions.Add(execution);
+        session.CurrentNodeKey = execution.NodeKey;
+        session.UpdatedAt = DateTimeOffset.UtcNow;
+        UpdateStateJson(session, new
+        {
+            sessionId = session.Id,
+            status = PublicStatus(session.Status),
+            currentNode = session.CurrentNodeKey
+        });
         AppendEvent(dbContext, session.Id, ref nextSequence, WorkflowEventType.ExecutorStarted, "executor.started", new
         {
             nodeName = execution.NodeKey
@@ -1753,6 +2055,8 @@ public sealed class ControlPlaneWorkflowRuntime(
             workflowSessionId = session.Id,
             status = PublicStatus(session.Status),
             currentNode = session.CurrentNodeKey,
+            inputPayloadJson = session.InputPayloadJson,
+            skillSelection = BuildSkillSelectionSnapshot(session.InputPayloadJson),
             resultType = session.ResultType,
             resultPayloadJson = session.ResultPayloadJson,
             activeReviewTaskId = session.ActiveReviewTaskId,
@@ -1791,6 +2095,43 @@ public sealed class ControlPlaneWorkflowRuntime(
         };
     }
 
+    private WorkflowSkillResolution ResolveWorkflowSkills(
+        McpConnectionEntity connection,
+        DbConfigWorkflowCommand command)
+    {
+        var resolution = workflowSkillResolver.Resolve(
+            connection.Engine,
+            "db-config-optimization",
+            command.BundleId,
+            command.BundleVersion);
+
+        if (!string.Equals(command.InvestigationSkillId, resolution.Investigation.SkillId, StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(command.InvestigationSkillVersion, resolution.Investigation.Version, StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(command.DiagnosisSkillId, resolution.Diagnosis.SkillId, StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(command.DiagnosisSkillVersion, resolution.Diagnosis.Version, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                $"Persisted skill selection does not match resolved bundle `{command.BundleId}@{command.BundleVersion}`.");
+        }
+
+        return resolution;
+    }
+
+    private static void UpsertCollectionMetadata(
+        List<DbConfigCollectionMetadataItem> metadata,
+        string name,
+        string value,
+        string description)
+    {
+        var existing = metadata.FirstOrDefault(item => string.Equals(item.Name, name, StringComparison.OrdinalIgnoreCase));
+        if (existing is not null)
+        {
+            metadata.Remove(existing);
+        }
+
+        metadata.Add(new DbConfigCollectionMetadataItem(name, value, description));
+    }
+
     private static WorkflowNodeExecutionEntity CreateNodeExecution(
         Guid sessionId,
         string nodeKey,
@@ -1816,6 +2157,15 @@ public sealed class ControlPlaneWorkflowRuntime(
     {
         execution.Status = WorkflowNodeExecutionStatus.Succeeded;
         execution.OutputPayloadJson = outputJson;
+        execution.CompletedAt = DateTimeOffset.UtcNow;
+    }
+
+    private static void FailNodeExecution(
+        WorkflowNodeExecutionEntity execution,
+        string errorMessage)
+    {
+        execution.Status = WorkflowNodeExecutionStatus.Failed;
+        execution.ErrorMessage = errorMessage;
         execution.CompletedAt = DateTimeOffset.UtcNow;
     }
 
@@ -1852,7 +2202,76 @@ public sealed class ControlPlaneWorkflowRuntime(
 
     private static void UpdateStateJson(WorkflowSessionEntity session, object state)
     {
-        session.StateJson = JsonSerializer.Serialize(state, SerializerOptions);
+        var merged = ParseJsonObject(session.StateJson);
+        MergeJsonObjects(merged, ParseJsonObject(JsonSerializer.Serialize(state, SerializerOptions)));
+
+        if (TryDeserializeWorkflowCommand(session.InputPayloadJson) is { } command)
+        {
+            merged["bundleId"] = command.BundleId;
+            merged["bundleVersion"] = command.BundleVersion;
+            merged["investigationSkillId"] = command.InvestigationSkillId;
+            merged["investigationSkillVersion"] = command.InvestigationSkillVersion;
+            merged["diagnosisSkillId"] = command.DiagnosisSkillId;
+            merged["diagnosisSkillVersion"] = command.DiagnosisSkillVersion;
+            merged["skillSelection"] = BuildSkillSelectionSnapshot(command);
+        }
+
+        session.StateJson = merged.ToJsonString(SerializerOptions);
+    }
+
+    private static JsonObject ParseJsonObject(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return new JsonObject();
+        }
+
+        return JsonNode.Parse(json)?.AsObject() ?? new JsonObject();
+    }
+
+    private static void MergeJsonObjects(JsonObject target, JsonObject source)
+    {
+        foreach (var property in source)
+        {
+            target[property.Key] = property.Value?.DeepClone();
+        }
+    }
+
+    private static JsonObject? BuildSkillSelectionSnapshot(string? inputPayloadJson)
+    {
+        return TryDeserializeWorkflowCommand(inputPayloadJson) is { } command
+            ? BuildSkillSelectionSnapshot(command)
+            : null;
+    }
+
+    private static JsonObject BuildSkillSelectionSnapshot(DbConfigWorkflowCommand command)
+    {
+        return new JsonObject
+        {
+            ["bundleId"] = command.BundleId,
+            ["bundleVersion"] = command.BundleVersion,
+            ["investigationSkillId"] = command.InvestigationSkillId,
+            ["investigationSkillVersion"] = command.InvestigationSkillVersion,
+            ["diagnosisSkillId"] = command.DiagnosisSkillId,
+            ["diagnosisSkillVersion"] = command.DiagnosisSkillVersion
+        };
+    }
+
+    private static DbConfigWorkflowCommand? TryDeserializeWorkflowCommand(string? inputPayloadJson)
+    {
+        if (string.IsNullOrWhiteSpace(inputPayloadJson))
+        {
+            return null;
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<DbConfigWorkflowCommand>(inputPayloadJson, SerializerOptions);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static string PublicStatus(WorkflowSessionStatus status)
@@ -2053,6 +2472,7 @@ public sealed class ControlPlaneWorkflowRuntime(
                     session.ResultPayloadJson,
                     WorkflowResultParser.TryParse(session.ResultPayloadJson)),
             summary,
+            WorkflowResultParser.TryParseSkillSelection(session.InputPayloadJson),
             session.ErrorMessage,
             $"/api/workflows/{session.Id}/events",
             session.CreatedAt,

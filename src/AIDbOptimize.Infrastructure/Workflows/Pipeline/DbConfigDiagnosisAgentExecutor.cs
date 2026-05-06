@@ -1,13 +1,16 @@
+using System.ClientModel;
 using System.Text.Json;
+using AIDbOptimize.Domain.DbConfigOptimization.Enums;
 using AIDbOptimize.Domain.DbConfigOptimization.Models;
 using AIDbOptimize.Infrastructure.Observability;
 using AIDbOptimize.Infrastructure.Security;
+using AIDbOptimize.Infrastructure.Workflows.Skills;
 using Microsoft.Agents.AI;
+using Microsoft.Agents.AI.OpenAI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using OpenAI;
 using OpenAI.Chat;
-using System.ClientModel;
 
 namespace AIDbOptimize.Infrastructure.Workflows.Pipeline;
 
@@ -16,11 +19,13 @@ namespace AIDbOptimize.Infrastructure.Workflows.Pipeline;
 /// </summary>
 public sealed class DbConfigDiagnosisAgentExecutor(
     DbConfigDiagnosisAgentOptions options,
+    DiagnosisRuleEvaluator diagnosisRuleEvaluator,
     ILoggerFactory loggerFactory,
     IServiceProvider services)
     : IDbConfigDiagnosisAgentExecutor
 {
     private readonly DbConfigDiagnosisAgentOptions _options = options;
+    private readonly DiagnosisRuleEvaluator _diagnosisRuleEvaluator = diagnosisRuleEvaluator;
     private readonly ILoggerFactory _loggerFactory = loggerFactory;
     private readonly IServiceProvider _services = services;
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
@@ -34,7 +39,8 @@ public sealed class DbConfigDiagnosisAgentExecutor(
         string databaseName,
         string engine,
         string optimizationGoal,
-        DbConfigEvidencePack evidence)
+        DbConfigEvidencePack evidence,
+        DiagnosisSkillDefinition? diagnosisSkill = null)
     {
         return PromptInputBuilder.BuildDbConfigPrompt(
             displayName,
@@ -42,12 +48,14 @@ public sealed class DbConfigDiagnosisAgentExecutor(
             engine,
             optimizationGoal,
             notes: null,
-            evidence);
+            evidence,
+            diagnosisSkill);
     }
 
     public async Task<DbConfigDiagnosisExecutionResult> ExecuteAsync(
         DbConfigEvidencePack evidence,
         string? optimizationGoal,
+        DiagnosisSkillDefinition? diagnosisSkill = null,
         CancellationToken cancellationToken = default)
     {
         using var activity = AIDbOptimizeTelemetry.AgentActivitySource.StartActivity("agent.diagnosis.execute");
@@ -59,13 +67,14 @@ public sealed class DbConfigDiagnosisAgentExecutor(
             databaseName: evidence.DatabaseName,
             engine: evidence.Engine.ToString(),
             optimizationGoal: optimizationGoal ?? string.Empty,
-            evidence: evidence);
+            evidence: evidence,
+            diagnosisSkill: diagnosisSkill);
 
         var agent = BuildAgent(_options, _loggerFactory, _services);
-        var session = await agent.CreateSessionAsync(cancellationToken);
+        // 让 ChatClientAgent 在每次调用时自行创建会话，避免依赖服务端会话存储。
         var response = await agent.RunAsync(
             prompt,
-            session,
+            session: null,
             cancellationToken: cancellationToken);
 
         var responseText = response.Text?.Trim();
@@ -78,11 +87,15 @@ public sealed class DbConfigDiagnosisAgentExecutor(
             ?? throw new InvalidOperationException("MAF 诊断智能体返回的 JSON 无法解析。");
         EnforceNoSpecificTargetValuesWithoutHostContext(evidence, value);
 
+        var recommendations = diagnosisSkill is null
+            ? value.Recommendations.Select(EnsureRecommendationType).ToArray()
+            : _diagnosisRuleEvaluator.Evaluate(evidence, diagnosisSkill, value.Recommendations);
+
         var reportJson = JsonSerializer.Serialize(new
         {
             title = value.Title,
             summary = value.Summary,
-            recommendations = value.Recommendations,
+            recommendations,
             evidenceItems = value.EvidenceItems,
             missingContextItems = value.MissingContextItems ?? evidence.MissingContextItems,
             collectionMetadata = value.CollectionMetadata ?? evidence.CollectionMetadata,
@@ -101,7 +114,9 @@ public sealed class DbConfigDiagnosisAgentExecutor(
     {
         if (!options.IsConfigured)
         {
-            throw new InvalidOperationException("DbConfig 诊断智能体尚未配置。");
+            throw new InvalidOperationException(
+                "DbConfig 诊断智能体未配置有效 ApiKey。请先在 src/AIDbOptimize.ApiService/appsettings.json 的占位配置基础上填写真实值，" +
+                "并优先在 src/AIDbOptimize.ApiService/appsettings.Local.json 的 AIDbOptimize:Agent:Diagnosis:ApiKey 中覆盖。");
         }
 
         var client = new ChatClient(
@@ -109,19 +124,20 @@ public sealed class DbConfigDiagnosisAgentExecutor(
             credential: new ApiKeyCredential(options.ApiKey),
             options: new OpenAIClientOptions
             {
-                Endpoint = new Uri(options.Endpoint)
+                Endpoint = new Uri(options.Endpoint),
+                NetworkTimeout = TimeSpan.FromMinutes(3)
             });
 
-        var meaiClient = client.AsIChatClient();
-        return (ChatClientAgent)meaiClient.AsAIAgent(
-            new ChatClientAgentOptions
+        return client.AsAIAgent(
+            options: new ChatClientAgentOptions
             {
                 Name = "DbConfigDiagnosisAgent",
                 Description = "Generate a grounded db configuration optimization report.",
                 ChatOptions = BuildChatOptions(options)
             },
-            loggerFactory,
-            services);
+            clientFactory: null,
+            loggerFactory: loggerFactory,
+            services: services);
     }
 
     private static ChatOptions BuildChatOptions(DbConfigDiagnosisAgentOptions options)
@@ -133,18 +149,18 @@ public sealed class DbConfigDiagnosisAgentExecutor(
                 : Microsoft.Extensions.AI.ChatResponseFormat.ForJsonSchema<DbConfigDiagnosisAgentResponse>(SerializerOptions),
             Instructions = """
 你是数据库配置优化分析助手。
-你只能使用输入中的证据，不允许虚构环境信息或补全不存在的观测数据。
-你必须只返回 JSON，并且 title、summary、suggestion 等自然语言字段必须使用中文。
-如果缺少宿主资源上下文，不允许给出具体目标参数值或“调到 X GB / X MB / X%”这类结论，只能给出保守建议。
-JSON 对象必须包含：
-- title: string
-- summary: string
-- recommendations: array of { key: string, suggestion: string, severity: string, findingType: string, confidence: string, requiresMoreContext: boolean, impactSummary: string | null, evidenceReferences: string[], recommendationClass: string, appliesWhen: string | null, ruleId: string | null, ruleVersion: string | null }
-- evidenceItems: array of { sourceType: string, reference: string, description: string, category: string, rawValue: string | null, normalizedValue: string | null, unit: string | null, sourceScope: string, capturedAt: string | null, expiresAt: string | null, isCached: boolean, collectionMethod: string | null }
-- missingContextItems: array of { reference: string, description: string, reason: string, sourceScope: string, severity: string }
-- collectionMetadata: array of { name: string, value: string, description: string | null }
-- warnings: array of strings
-不要输出 Markdown，不要输出解释性前后缀，不要输出代码块。
+只允许基于输入证据推理，不允许补造环境信息或观测数据。
+只输出一个合法 JSON 对象，不要输出 Markdown、解释性前后缀或代码块。
+顶层字段固定为 title、summary、recommendations、evidenceItems、missingContextItems、collectionMetadata、warnings。
+recommendations 中每一项都必须包含 key、suggestion、severity、findingType、confidence、requiresMoreContext、impactSummary、evidenceReferences、recommendationClass、recommendationType、appliesWhen、ruleId、ruleVersion。
+evidenceItems 中每一项都必须包含 sourceType、reference、description、category、rawValue、normalizedValue、unit、sourceScope、capturedAt、expiresAt、isCached、collectionMethod。
+missingContextItems 中每一项都必须包含 reference、description、reason、sourceScope、severity。
+collectionMetadata 中每一项都必须包含 name、value、description。
+recommendationType 只能是 actionableRecommendation 或 requestMoreContext。
+evidenceItems、missingContextItems、collectionMetadata 的字段名必须与输入 contract 保持一致。
+title、summary、suggestion 等自然语言字段必须使用中文。
+如果缺少宿主资源上下文，不允许给出具体目标参数值或“调到 X GB / X MB / X%”这类结论，只能给出保守建议或 requestMoreContext。
+当 Host Context Availability=missing 时，凡是需要具体数值目标的 tuning / capacity recommendation，都必须改为 recommendationType=requestMoreContext；suggestion、appliesWhen、impactSummary 中禁止出现数字+单位以及“设置为 / 调整到 / set to / tune to”这类表达。
 """
         };
     }
@@ -192,6 +208,28 @@ JSON 对象必须包含：
             text,
             @"(\d+(\.\d+)?\s*(KB|MB|GB|TB|%|cores?))|(调整到|设置为|set to|tune to)",
             System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+    }
+
+    private static DbConfigRecommendation EnsureRecommendationType(DbConfigRecommendation recommendation)
+    {
+        var recommendationType = recommendation.RequiresMoreContext
+            ? DbConfigRecommendationType.RequestMoreContext
+            : recommendation.RecommendationType;
+
+        return new DbConfigRecommendation(
+            recommendation.Key,
+            recommendation.Suggestion,
+            recommendation.Severity,
+            recommendation.FindingType,
+            recommendation.Confidence,
+            recommendation.RequiresMoreContext,
+            recommendation.ImpactSummary,
+            recommendation.EvidenceReferences,
+            recommendation.RecommendationClass,
+            recommendationType,
+            recommendation.AppliesWhen,
+            recommendation.RuleId,
+            recommendation.RuleVersion);
     }
 }
 

@@ -13,16 +13,16 @@
 
 ## 设计与计划文档
 
-长期设计方案、执行计划和任务清单统一维护在：
+长期设计方案、实现说明和执行计划统一维护在：
 
 - [docs/README.md](./docs/README.md)
 - [Workflow 后端代码流程说明](./docs/workflow/README.md)
 
 当前唯一执行计划：
 
-- [数据库配置优化 workflow 总体方案](./docs/plans/active/2026-04-aidboptimize-db-config-workflow/design.md)
-- [数据库配置优化 workflow 详细设计](./docs/plans/active/2026-04-aidboptimize-db-config-workflow/detailed-design.md)
-- [数据库配置优化 workflow 任务清单](./docs/plans/active/2026-04-aidboptimize-db-config-workflow/tasks.md)
+- [workflow skills v1 方案](./docs/plans/active/2026-05-aidboptimize-workflow-skills-v1/design.md)
+- [workflow skills v1 详细方案](./docs/plans/active/2026-05-aidboptimize-workflow-skills-v1/detailed-design.md)
+- [workflow skills v1 任务清单](./docs/plans/active/2026-05-aidboptimize-workflow-skills-v1/tasks.md)
 
 ## 启动方式
 
@@ -33,6 +33,13 @@ dotnet run --project .\src\AIDbOptimize.AppHost\AIDbOptimize.AppHost.csproj
 ```
 
 启动后可通过 Aspire Dashboard 查看整体运行状态。
+
+如果要跑完整的 diagnosis / review 主链，还需要先配置 diagnosis agent：
+
+- 共享占位文件：`src/AIDbOptimize.ApiService/appsettings.json`
+- 本地覆盖文件：`src/AIDbOptimize.ApiService/appsettings.Local.json`
+- 配置键：`AIDbOptimize:Agent:Diagnosis:Endpoint`、`Model`、`ApiKey`
+- 约定：`appsettings.json` 中的 `ApiKey` 只保留占位值 `xxx`，真实值优先放在 `appsettings.Local.json`
 
 ## 固定端口清单
 
@@ -59,4 +66,4 @@ dotnet run --project .\src\AIDbOptimize.AppHost\AIDbOptimize.AppHost.csproj
 - MCP 控制面、工具执行审计与 agent 持久化
 - 对应测试工程与前端工作台
 
-后续执行顺序仍以仓库根 [CLAUDE.md](./CLAUDE.md) 和当前唯一任务清单为准。
+后续执行顺序以仓库根 [CLAUDE.md](./CLAUDE.md) 和当前唯一任务清单为准。

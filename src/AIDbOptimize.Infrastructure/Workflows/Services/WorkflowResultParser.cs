@@ -1,10 +1,40 @@
 using System.Text.Json;
 using AIDbOptimize.Application.Workflows.Dtos;
+using AIDbOptimize.Infrastructure.Workflows.Runtime;
 
 namespace AIDbOptimize.Infrastructure.Workflows.Services;
 
 internal static class WorkflowResultParser
 {
+    public static WorkflowSkillSelectionDto? TryParseSkillSelection(string? inputPayloadJson)
+    {
+        if (string.IsNullOrWhiteSpace(inputPayloadJson))
+        {
+            return null;
+        }
+
+        try
+        {
+            var command = JsonSerializer.Deserialize<DbConfigWorkflowCommand>(
+                inputPayloadJson,
+                new JsonSerializerOptions(JsonSerializerDefaults.Web));
+
+            return command is null
+                ? null
+                : new WorkflowSkillSelectionDto(
+                    command.BundleId,
+                    command.BundleVersion,
+                    command.InvestigationSkillId,
+                    command.InvestigationSkillVersion,
+                    command.DiagnosisSkillId,
+                    command.DiagnosisSkillVersion);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     public static WorkflowStructuredResultDto? TryParse(string? payloadJson)
     {
         if (string.IsNullOrWhiteSpace(payloadJson) || string.Equals(payloadJson, "{}", StringComparison.Ordinal))
@@ -55,6 +85,7 @@ internal static class WorkflowResultParser
                 GetString(item, "impactSummary"),
                 ParseStringArray(item, "evidenceReferences"),
                 GetString(item, "recommendationClass") ?? "tuning",
+                GetString(item, "recommendationType") ?? "actionableRecommendation",
                 GetString(item, "appliesWhen"),
                 GetString(item, "ruleId"),
                 GetString(item, "ruleVersion")))

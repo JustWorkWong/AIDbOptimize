@@ -1,9 +1,18 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { WorkflowSessionDetail } from '../../models/workflow'
+import type { WorkflowHistoryDetail, WorkflowSessionDetail } from '../../models/workflow'
+import {
+  extractWorkflowStructuredResult,
+  describeWorkflowNode,
+  formatWorkflowGateStatus,
+  formatWorkflowStatus,
+  formatWorkflowVersionTag,
+  summarizeWorkflowExecutionOverview,
+} from '../../models/workflow'
 
 const props = defineProps<{
   session: WorkflowSessionDetail | null
+  historyDetail: WorkflowHistoryDetail | null
 }>()
 
 const emit = defineEmits<{
@@ -14,6 +23,13 @@ const canCancel = computed(() => {
   return props.session !== null
     && !['Completed', 'Cancelled', 'Failed'].includes(props.session.status)
 })
+
+const parsedReport = computed(() => {
+  return props.session?.result?.parsedReport ?? extractWorkflowStructuredResult(props.session?.result) ?? null
+})
+
+const currentNode = computed(() => describeWorkflowNode(props.session?.currentNode))
+const executionOverview = computed(() => summarizeWorkflowExecutionOverview(parsedReport.value, props.historyDetail))
 </script>
 
 <template>
@@ -36,11 +52,15 @@ const canCancel = computed(() => {
     <div v-else class="review-detail-grid">
       <div class="tip-card">
         <strong>状态</strong>
-        <span>{{ session.status }}</span>
+        <span>{{ formatWorkflowStatus(session.status) }}</span>
       </div>
       <div class="tip-card">
-        <strong>当前节点</strong>
-        <span>{{ session.currentNode || 'n/a' }}</span>
+        <strong>当前阶段</strong>
+        <span>{{ currentNode.label }}</span>
+      </div>
+      <div class="tip-card">
+        <strong>阶段说明</strong>
+        <span>{{ currentNode.description }}</span>
       </div>
       <div class="tip-card">
         <strong>进度</strong>
@@ -57,6 +77,51 @@ const canCancel = computed(() => {
       <div class="tip-card">
         <strong>数据库</strong>
         <span>{{ session.connection.databaseName }}</span>
+      </div>
+      <div class="tip-card">
+        <strong>Bundle</strong>
+        <span>
+          {{
+            formatWorkflowVersionTag(
+              session.skillSelection?.bundleId ?? executionOverview?.bundleId,
+              session.skillSelection?.bundleVersion ?? executionOverview?.bundleVersion,
+            )
+          }}
+        </span>
+      </div>
+      <div class="tip-card">
+        <strong>排查 skill</strong>
+        <span>
+          {{
+            formatWorkflowVersionTag(
+              session.skillSelection?.investigationSkillId ?? executionOverview?.investigationSkillId,
+              session.skillSelection?.investigationSkillVersion ?? executionOverview?.investigationSkillVersion,
+            )
+          }}
+        </span>
+      </div>
+      <div class="tip-card">
+        <strong>诊断 skill</strong>
+        <span>
+          {{
+            formatWorkflowVersionTag(
+              session.skillSelection?.diagnosisSkillId ?? executionOverview?.diagnosisSkillId,
+              session.skillSelection?.diagnosisSkillVersion ?? executionOverview?.diagnosisSkillVersion,
+            )
+          }}
+        </span>
+      </div>
+      <div class="tip-card">
+        <strong>Gate</strong>
+        <span>{{ formatWorkflowGateStatus(executionOverview?.gateStatus) }}</span>
+      </div>
+      <div class="tip-card">
+        <strong>采集完成度</strong>
+        <span>{{ executionOverview?.collectionCompleteness || 'n/a' }}</span>
+      </div>
+      <div class="tip-card">
+        <strong>计划 ID</strong>
+        <span>{{ executionOverview?.planId || 'n/a' }}</span>
       </div>
     </div>
 

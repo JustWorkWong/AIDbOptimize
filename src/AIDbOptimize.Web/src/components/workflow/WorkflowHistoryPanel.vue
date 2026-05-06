@@ -1,7 +1,13 @@
 <script setup lang="ts">
 import type { WorkflowSessionSummary } from '../../models/workflow'
+import {
+  formatWorkflowDateTime,
+  formatWorkflowStatus,
+  formatWorkflowVersionTag,
+  describeWorkflowNode,
+} from '../../models/workflow'
 
-defineProps<{
+const props = defineProps<{
   items: WorkflowSessionSummary[]
   loading: boolean
   message: string
@@ -36,16 +42,28 @@ const emit = defineEmits<{
 
     <div v-if="items.length" class="workflow-list">
       <button
-        v-for="item in items"
+        v-for="item in props.items"
         :key="item.sessionId"
         type="button"
         class="workflow-list-item"
-        :class="{ active: item.sessionId === selectedSessionId }"
+        :class="{ active: item.sessionId === props.selectedSessionId }"
         @click="emit('select', item.sessionId)"
       >
         <strong>{{ item.connection.displayName }}</strong>
-        <span>{{ item.status }} · {{ item.currentNode || '无' }}</span>
-        <em>{{ item.connection.engine }} · {{ item.connection.databaseName }} · {{ item.updatedAt }}</em>
+        <span>{{ formatWorkflowStatus(item.status) }} · {{ describeWorkflowNode(item.currentNode).label }}</span>
+        <em>{{ item.connection.engine }} · {{ item.connection.databaseName }} · {{ formatWorkflowDateTime(item.updatedAt) }}</em>
+        <span>
+          {{
+            formatWorkflowVersionTag(
+              item.skillSelection?.bundleId,
+              item.skillSelection?.bundleVersion,
+              '默认 bundle',
+            )
+          }}
+        </span>
+        <span v-if="item.skillSelection">
+          排查: {{ formatWorkflowVersionTag(item.skillSelection.investigationSkillId, item.skillSelection.investigationSkillVersion) }}
+        </span>
       </button>
     </div>
   </article>

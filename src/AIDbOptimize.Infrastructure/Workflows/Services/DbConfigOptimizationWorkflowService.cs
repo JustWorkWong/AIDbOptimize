@@ -2,6 +2,7 @@ using AIDbOptimize.Application.Workflows.Dtos;
 using AIDbOptimize.Application.Workflows.Services;
 using AIDbOptimize.Infrastructure.Persistence;
 using AIDbOptimize.Infrastructure.Workflows.Runtime;
+using AIDbOptimize.Infrastructure.Workflows.Skills;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -15,6 +16,7 @@ public sealed class DbConfigOptimizationWorkflowService(
     IDbContextFactory<ControlPlaneDbContext> dbContextFactory,
     IWorkflowRuntime workflowRuntime,
     IWorkflowExecutionRegistry workflowExecutionRegistry,
+    WorkflowSkillResolver workflowSkillResolver,
     IServiceScopeFactory serviceScopeFactory,
     ILogger<DbConfigOptimizationWorkflowService> logger)
     : IDbConfigOptimizationWorkflowService
@@ -28,8 +30,25 @@ public sealed class DbConfigOptimizationWorkflowService(
             throw new InvalidOperationException("连接 ID 必须是合法的 Guid。");
         }
 
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var connection = await dbContext.McpConnections
+            .AsNoTracking()
+            .SingleOrDefaultAsync(x => x.Id == connectionId, cancellationToken)
+            ?? throw new InvalidOperationException($"未找到连接：{connectionId}");
+        var resolution = workflowSkillResolver.Resolve(
+            connection.Engine,
+            "db-config-optimization",
+            request.BundleId,
+            request.BundleVersion);
+
         var command = new DbConfigWorkflowCommand(
             connectionId,
+            resolution.Bundle.BundleId,
+            resolution.Bundle.BundleVersion,
+            resolution.Investigation.SkillId,
+            resolution.Investigation.Version,
+            resolution.Diagnosis.SkillId,
+            resolution.Diagnosis.Version,
             string.IsNullOrWhiteSpace(request.RequestedBy) ? "frontend" : request.RequestedBy,
             request.Notes,
             request.Options.AllowFallbackSnapshot,
@@ -124,6 +143,7 @@ public sealed class DbConfigOptimizationWorkflowService(
                     session.ResultPayloadJson,
                     WorkflowResultParser.TryParse(session.ResultPayloadJson)),
             summary,
+            WorkflowResultParser.TryParseSkillSelection(session.InputPayloadJson),
             session.ErrorMessage,
             $"/api/workflows/{session.Id}/events",
             session.CreatedAt,
@@ -135,10 +155,13 @@ public sealed class DbConfigOptimizationWorkflowService(
         CancellationToken cancellationToken = default)
     {
         await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-        return await dbContext.WorkflowSessions
+        var sessions = await dbContext.WorkflowSessions
             .AsNoTracking()
             .Include(x => x.Connection)
             .OrderByDescending(x => x.CreatedAt)
+            .ToListAsync(cancellationToken);
+
+        return sessions
             .Select(x => new WorkflowSessionSummaryDto(
                 x.Id.ToString(),
                 x.WorkflowName,
@@ -153,11 +176,12 @@ public sealed class DbConfigOptimizationWorkflowService(
                     x.Connection.DisplayName,
                     x.Connection.Engine.ToString(),
                     x.Connection.DatabaseName),
+                WorkflowResultParser.TryParseSkillSelection(x.InputPayloadJson),
                 x.ActiveReviewTaskId.HasValue ? x.ActiveReviewTaskId.Value.ToString() : null,
                 x.CreatedAt,
                 x.UpdatedAt,
                 x.CompletedAt))
-            .ToListAsync(cancellationToken);
+            .ToList();
     }
 
     public async Task<WorkflowCancellationResultDto> CancelAsync(

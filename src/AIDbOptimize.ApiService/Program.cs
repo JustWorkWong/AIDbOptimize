@@ -18,6 +18,7 @@ using AIDbOptimize.Infrastructure.Security;
 using AIDbOptimize.Infrastructure.Workflows.Pipeline;
 using AIDbOptimize.Infrastructure.Workflows.Runtime;
 using AIDbOptimize.Infrastructure.Workflows.Services;
+using AIDbOptimize.Infrastructure.Workflows.Skills;
 using Microsoft.EntityFrameworkCore;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
@@ -118,11 +119,22 @@ builder.Services.AddScoped<IDbConfigRule, PostgreSqlTempIoRule>();
 builder.Services.AddScoped<IDbConfigRule, PostgreSqlObservabilityGapRule>();
 builder.Services.AddScoped<DbConfigSnapshotCollectorExecutor>();
 builder.Services.AddScoped<DbConfigRuleAnalysisExecutor>();
+builder.Services.AddSingleton<EvidenceCapabilityCatalog>();
+builder.Services.AddScoped<InvestigationPlanner>();
+builder.Services.AddScoped<EvidenceCollectionSubworkflow>();
+builder.Services.AddScoped<SkillPolicyGate>();
+builder.Services.AddScoped<DiagnosisRuleEvaluator>();
 builder.Services.AddScoped<DbConfigDiagnosisReportBuilder>();
 builder.Services.AddScoped<IDbConfigDiagnosisAgentExecutor, DbConfigDiagnosisAgentExecutor>();
 builder.Services.AddScoped<RecommendationSchemaValidator>();
 builder.Services.AddScoped<DbConfigGroundingExecutor>();
 builder.Services.AddScoped<ReviewAdjustmentValidator>();
+builder.Services.AddSingleton<MarkdownSkillParser>();
+builder.Services.AddSingleton(sp =>
+    new WorkflowSkillCatalog(
+        ResolveWorkflowSkillsRootPath(builder.Environment.ContentRootPath),
+        sp.GetRequiredService<MarkdownSkillParser>()));
+builder.Services.AddSingleton<WorkflowSkillResolver>();
 builder.Services.AddScoped<IWorkflowRuntime, ControlPlaneWorkflowRuntime>();
 builder.Services.AddSingleton<IWorkflowExecutionRegistry, WorkflowExecutionRegistry>();
 builder.Services.AddScoped<IMcpDiscoveryService, McpDiscoveryService>();
@@ -259,6 +271,24 @@ static string ResolveConnectionString(
         aspireName,
         fallbackName,
         defaultValue);
+}
+
+static string ResolveWorkflowSkillsRootPath(string contentRootPath)
+{
+    var directPath = Path.Combine(contentRootPath, "docs", "workflow", "skills");
+    if (Directory.Exists(directPath))
+    {
+        return directPath;
+    }
+
+    var repoRootPath = Path.GetFullPath(Path.Combine(contentRootPath, "..", ".."));
+    var repoSkillsPath = Path.Combine(repoRootPath, "docs", "workflow", "skills");
+    if (Directory.Exists(repoSkillsPath))
+    {
+        return repoSkillsPath;
+    }
+
+    return directPath;
 }
 
 internal sealed record InfrastructureOverviewResponse(

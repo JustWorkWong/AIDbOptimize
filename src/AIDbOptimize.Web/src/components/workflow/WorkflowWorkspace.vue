@@ -247,7 +247,11 @@ async function handleReplayRefresh(): Promise<void> {
       :message="message"
       @submit="handleWorkflowSubmit"
     />
-    <WorkflowStatusCard :session="selectedSession" @cancel="handleWorkflowCancel" />
+    <WorkflowStatusCard
+      :session="selectedSession"
+      :history-detail="historyDetail"
+      @cancel="handleWorkflowCancel"
+    />
   </section>
 
   <section class="panel-grid">

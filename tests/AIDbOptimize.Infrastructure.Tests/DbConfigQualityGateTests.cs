@@ -1,4 +1,5 @@
 using System.Text.Json;
+using AIDbOptimize.Domain.DbConfigOptimization.Enums;
 using AIDbOptimize.Domain.DbConfigOptimization.Models;
 using AIDbOptimize.Domain.Mcp.Enums;
 using AIDbOptimize.Infrastructure.Workflows.Pipeline;
@@ -50,6 +51,7 @@ public sealed class DbConfigQualityGateTests
               "impactSummary":"cache pressure",
               "evidenceReferences":["shared_buffers"],
               "recommendationClass":"tuning",
+              "recommendationType":"actionableRecommendation",
               "appliesWhen":"cache pressure is visible",
               "ruleId":"postgres.shared-buffers.reassessment",
               "ruleVersion":"2026-04-30"
@@ -116,6 +118,7 @@ public sealed class DbConfigQualityGateTests
               "impactSummary":"missing observability",
               "evidenceReferences":["slow_query_log"],
               "recommendationClass":"observability",
+              "recommendationType":"actionableRecommendation",
               "appliesWhen":"slow query visibility is missing",
               "ruleId":"generic.observability-gap",
               "ruleVersion":"2026-04-30"
@@ -165,6 +168,7 @@ public sealed class DbConfigQualityGateTests
               "impactSummary":"higher memory reserve",
               "evidenceReferences":["max_connections","threads_connected"],
               "recommendationClass":"capacity-planning",
+              "recommendationType":"actionableRecommendation",
               "appliesWhen":"current concurrency remains low",
               "ruleId":"mysql.connections.capacity",
               "ruleVersion":"2026-04-30"
@@ -243,6 +247,7 @@ public sealed class DbConfigQualityGateTests
                     impactSummary: "memory tuning",
                     evidenceReferences: ["innodb_buffer_pool_size"],
                     recommendationClass: "tuning",
+                    recommendationType: DbConfigRecommendationType.ActionableRecommendation,
                     appliesWhen: "tune to 4GB immediately",
                     ruleId: "mysql.buffer-pool.reassessment",
                     ruleVersion: "2026-04-30")

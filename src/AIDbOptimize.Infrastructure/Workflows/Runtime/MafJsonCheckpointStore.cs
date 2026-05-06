@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using AIDbOptimize.Infrastructure.Persistence;
 using AIDbOptimize.Infrastructure.Persistence.Entities;
 using Microsoft.Agents.AI.Workflows;
@@ -11,6 +12,8 @@ public sealed class MafJsonCheckpointStore(
     IDbContextFactory<ControlPlaneDbContext> dbContextFactory)
     : ICheckpointStore<JsonElement>
 {
+    private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
+
     public async ValueTask<IEnumerable<CheckpointInfo>> RetrieveIndexAsync(
         string sessionId,
         CheckpointInfo? withParent)
@@ -50,7 +53,7 @@ public sealed class MafJsonCheckpointStore(
             .Select(x => (int?)x.Sequence)
             .MaxAsync() ?? 0) + 1;
 
-        var snapshotJson = value.GetRawText();
+        var snapshotJson = EnrichSnapshotJson(value.GetRawText(), session.InputPayloadJson);
         var encoded = WorkflowCheckpointCodec.Encode(snapshotJson);
         var checkpointRef = $"{session.EngineRunId ?? "run"}:{nextSequence:D4}";
 
@@ -97,5 +100,46 @@ public sealed class MafJsonCheckpointStore(
 
         using var document = JsonDocument.Parse(checkpoint.SnapshotJson);
         return document.RootElement.Clone();
+    }
+
+    private static string EnrichSnapshotJson(string snapshotJson, string? inputPayloadJson)
+    {
+        var root = JsonNode.Parse(snapshotJson)?.AsObject();
+        if (root is null)
+        {
+            return snapshotJson;
+        }
+
+        if (TryDeserializeWorkflowCommand(inputPayloadJson) is { } command)
+        {
+            root["skillSelection"] = new JsonObject
+            {
+                ["bundleId"] = command.BundleId,
+                ["bundleVersion"] = command.BundleVersion,
+                ["investigationSkillId"] = command.InvestigationSkillId,
+                ["investigationSkillVersion"] = command.InvestigationSkillVersion,
+                ["diagnosisSkillId"] = command.DiagnosisSkillId,
+                ["diagnosisSkillVersion"] = command.DiagnosisSkillVersion
+            };
+        }
+
+        return root.ToJsonString(SerializerOptions);
+    }
+
+    private static DbConfigWorkflowCommand? TryDeserializeWorkflowCommand(string? inputPayloadJson)
+    {
+        if (string.IsNullOrWhiteSpace(inputPayloadJson))
+        {
+            return null;
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<DbConfigWorkflowCommand>(inputPayloadJson, SerializerOptions);
+        }
+        catch
+        {
+            return null;
+        }
     }
 }

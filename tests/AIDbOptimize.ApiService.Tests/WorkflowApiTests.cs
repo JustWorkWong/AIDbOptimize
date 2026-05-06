@@ -2,12 +2,14 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Threading;
+using AIDbOptimize.Domain.DbConfigOptimization.Enums;
 using AIDbOptimize.Application.Abstractions.Mcp;
 using AIDbOptimize.Domain.DbConfigOptimization.Models;
 using AIDbOptimize.Domain.Mcp.Enums;
 using AIDbOptimize.Infrastructure.Persistence;
 using AIDbOptimize.Infrastructure.Persistence.Entities;
 using AIDbOptimize.Infrastructure.Workflows.Pipeline;
+using AIDbOptimize.Infrastructure.Workflows.Skills;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
@@ -79,6 +81,143 @@ public sealed class WorkflowApiTests : IClassFixture<WorkflowApiTests.WorkflowAp
         var detailResponse = await client.GetAsync($"/api/workflows/{workflowId}");
         detailResponse.EnsureSuccessStatusCode();
         await WaitForWorkflowStatusAsync(client, workflowId!, expectedStatuses: ["Completed"], timeoutSeconds: 60);
+    }
+
+    [Fact]
+    public async Task StartWorkflow_WithExplicitBundleVersion_CompletesSuccessfully()
+    {
+        var connectionId = await _factory.SeedConnectionAsync("postgres-bundle", DatabaseEngine.PostgreSql);
+        using var client = _factory.CreateClient();
+
+        var startResponse = await client.PostAsJsonAsync("/api/workflows/db-config-optimization", new
+        {
+            connectionId = connectionId.ToString(),
+            bundleId = "postgresql-default",
+            bundleVersion = "1.0.0",
+            options = new
+            {
+                allowFallbackSnapshot = true,
+                requireHumanReview = false,
+                enableEvidenceGrounding = true
+            },
+            requestedBy = "frontend",
+            notes = "explicit-bundle"
+        });
+
+        startResponse.EnsureSuccessStatusCode();
+        using var startJson = JsonDocument.Parse(await startResponse.Content.ReadAsStringAsync());
+        var workflowId = startJson.RootElement.GetProperty("sessionId").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(workflowId));
+
+        await WaitForWorkflowStatusAsync(client, workflowId!, expectedStatuses: ["Completed"], timeoutSeconds: 60);
+
+        var detailResponse = await client.GetAsync($"/api/workflows/{workflowId}");
+        detailResponse.EnsureSuccessStatusCode();
+        using var detailJson = JsonDocument.Parse(await detailResponse.Content.ReadAsStringAsync());
+        var metadata = detailJson.RootElement
+            .GetProperty("result")
+            .GetProperty("parsedReport")
+            .GetProperty("collectionMetadata")
+            .EnumerateArray()
+            .ToDictionary(
+                item => item.GetProperty("name").GetString() ?? string.Empty,
+                item => item.GetProperty("value").GetString() ?? string.Empty,
+                StringComparer.OrdinalIgnoreCase);
+        Assert.Equal("postgresql-default", metadata["bundle_id"]);
+        Assert.Equal("1.0.0", metadata["bundle_version"]);
+        Assert.Equal("1.0.0", metadata["investigation_skill_version"]);
+        Assert.Equal("1.0.0", metadata["diagnosis_skill_version"]);
+        Assert.Equal("degraded", metadata["gate_status"]);
+    }
+
+    [Fact]
+    public async Task StartWorkflow_WhenBlockingEvidenceMissing_ProducesBlockedReport()
+    {
+        var connectionId = await _factory.SeedConnectionAsync("mysql-blocked", DatabaseEngine.MySql);
+        _factory.OmitToolFields(DatabaseEngine.MySql, "engine_version", "version_comment");
+        using var client = _factory.CreateClient();
+
+        var startResponse = await client.PostAsJsonAsync("/api/workflows/db-config-optimization", new
+        {
+            connectionId = connectionId.ToString(),
+            options = new
+            {
+                allowFallbackSnapshot = true,
+                requireHumanReview = false,
+                enableEvidenceGrounding = true
+            },
+            requestedBy = "frontend",
+            notes = "blocked-skill-policy"
+        });
+
+        startResponse.EnsureSuccessStatusCode();
+        using var startJson = JsonDocument.Parse(await startResponse.Content.ReadAsStringAsync());
+        var workflowId = startJson.RootElement.GetProperty("sessionId").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(workflowId));
+
+        await WaitForWorkflowStatusAsync(client, workflowId!, expectedStatuses: ["Completed"], timeoutSeconds: 60);
+
+        var detailResponse = await client.GetAsync($"/api/workflows/{workflowId}");
+        detailResponse.EnsureSuccessStatusCode();
+        using var detailJson = JsonDocument.Parse(await detailResponse.Content.ReadAsStringAsync());
+        var report = detailJson.RootElement.GetProperty("result").GetProperty("parsedReport");
+        Assert.Equal(0, report.GetProperty("recommendations").GetArrayLength());
+        Assert.Contains(
+            report.GetProperty("missingContextItems").EnumerateArray(),
+            item => string.Equals(item.GetProperty("reference").GetString(), "mysql.version_profile", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains("Workflow stopped before diagnosis", report.GetProperty("summary").GetString(), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(
+            report.GetProperty("collectionMetadata").EnumerateArray(),
+            item =>
+                string.Equals(item.GetProperty("name").GetString(), "gate_status", StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(item.GetProperty("value").GetString(), "blocked", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task StartWorkflow_WhenDiagnosisThrows_PersistsNodeFailureAndOriginalError()
+    {
+        var connectionId = await _factory.SeedConnectionAsync("mysql-diagnosis-failure", DatabaseEngine.MySql);
+        _factory.FailDiagnosis("diagnosis-agent-boom");
+        using var client = _factory.CreateClient();
+
+        var startResponse = await client.PostAsJsonAsync("/api/workflows/db-config-optimization", new
+        {
+            connectionId = connectionId.ToString(),
+            options = new
+            {
+                allowFallbackSnapshot = true,
+                requireHumanReview = false,
+                enableEvidenceGrounding = true
+            },
+            requestedBy = "frontend",
+            notes = "diagnosis-failure"
+        });
+
+        Assert.Equal(HttpStatusCode.Accepted, startResponse.StatusCode);
+        using var startJson = JsonDocument.Parse(await startResponse.Content.ReadAsStringAsync());
+        var workflowId = startJson.RootElement.GetProperty("sessionId").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(workflowId));
+
+        await WaitForWorkflowStatusAsync(client, workflowId!, expectedStatuses: ["Failed"], timeoutSeconds: 60);
+
+        var detailResponse = await client.GetAsync($"/api/workflows/{workflowId}");
+        detailResponse.EnsureSuccessStatusCode();
+        using var detailJson = JsonDocument.Parse(await detailResponse.Content.ReadAsStringAsync());
+        Assert.Equal("Failed", detailJson.RootElement.GetProperty("status").GetString());
+        Assert.Equal("DbConfigDiagnosisAgentExecutor", detailJson.RootElement.GetProperty("currentNode").GetString());
+        var error = detailJson.RootElement.GetProperty("error").GetString();
+        Assert.Contains("diagnosis-agent-boom", error, StringComparison.Ordinal);
+        Assert.DoesNotContain("without a completion output", error, StringComparison.OrdinalIgnoreCase);
+
+        var historyResponse = await client.GetAsync($"/api/history/{workflowId}");
+        historyResponse.EnsureSuccessStatusCode();
+        using var historyJson = JsonDocument.Parse(await historyResponse.Content.ReadAsStringAsync());
+        var diagnosisNode = historyJson.RootElement
+            .GetProperty("nodeExecutions")
+            .EnumerateArray()
+            .Single(item => string.Equals(item.GetProperty("nodeName").GetString(), "DbConfigDiagnosisAgentExecutor", StringComparison.Ordinal));
+        Assert.Equal("Failed", diagnosisNode.GetProperty("status").GetString());
+        Assert.Contains("diagnosis-agent-boom", diagnosisNode.GetProperty("error").GetString(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -366,6 +505,12 @@ public sealed class WorkflowApiTests : IClassFixture<WorkflowApiTests.WorkflowAp
         using var historyDetailJson = JsonDocument.Parse(await historyDetailResponse.Content.ReadAsStringAsync());
         Assert.True(historyDetailJson.RootElement.GetProperty("nodeExecutions").GetArrayLength() >= 1);
         Assert.True(historyDetailJson.RootElement.GetProperty("toolExecutions").GetArrayLength() >= 1);
+        Assert.Contains(
+            historyDetailJson.RootElement.GetProperty("nodeExecutions").EnumerateArray(),
+            item => string.Equals(
+                item.GetProperty("nodeName").GetString(),
+                "InvestigationPlanner",
+                StringComparison.Ordinal));
         Assert.True(historyDetailJson.RootElement.GetProperty("result").GetProperty("parsedReport").ValueKind == JsonValueKind.Object);
         Assert.True(historyDetailJson.RootElement
             .GetProperty("result")
@@ -530,6 +675,12 @@ public sealed class WorkflowApiTests : IClassFixture<WorkflowApiTests.WorkflowAp
         var queued = await runtime.QueueStartDbConfigAsync(
             new Infrastructure.Workflows.Runtime.DbConfigWorkflowCommand(
                 connectionId,
+                "mysql-default",
+                "1.0.0",
+                "mysql-investigation",
+                "1.0.0",
+                "mysql-diagnosis",
+                "1.0.0",
                 "tester",
                 "queued-recovery",
                 true,
@@ -551,6 +702,19 @@ public sealed class WorkflowApiTests : IClassFixture<WorkflowApiTests.WorkflowAp
         Assert.Equal(Domain.DbConfigOptimization.Enums.WorkflowSessionStatus.WaitingForReview, session.Status);
         Assert.NotNull(session.ActiveReviewTaskId);
         Assert.False(string.IsNullOrWhiteSpace(session.EngineCheckpointRef));
+        using var stateJson = JsonDocument.Parse(session.StateJson);
+        Assert.Equal("mysql-default", stateJson.RootElement.GetProperty("bundleId").GetString());
+        Assert.Equal("1.0.0", stateJson.RootElement.GetProperty("bundleVersion").GetString());
+        Assert.Equal("mysql-investigation", stateJson.RootElement.GetProperty("investigationSkillId").GetString());
+        Assert.Equal("mysql-diagnosis", stateJson.RootElement.GetProperty("diagnosisSkillId").GetString());
+
+        var latestCheckpoint = await dbContext.WorkflowCheckpoints
+            .Where(x => x.WorkflowSessionId == sessionId)
+            .OrderByDescending(x => x.Sequence)
+            .FirstAsync();
+        using var checkpointJson = JsonDocument.Parse(latestCheckpoint.SnapshotJson);
+        Assert.Equal("mysql-default", checkpointJson.RootElement.GetProperty("skillSelection").GetProperty("bundleId").GetString());
+        Assert.Equal("1.0.0", checkpointJson.RootElement.GetProperty("skillSelection").GetProperty("bundleVersion").GetString());
     }
 
     public sealed class WorkflowApiFactory : WebApplicationFactory<Program>
@@ -569,7 +733,7 @@ public sealed class WorkflowApiTests : IClassFixture<WorkflowApiTests.WorkflowAp
                 services.AddSingleton<IDbContextFactory<ControlPlaneDbContext>>(_dbContextFactory);
                 services.AddSingleton(new DbConfigDiagnosisAgentOptions());
                 services.RemoveAll<IDbConfigDiagnosisAgentExecutor>();
-                services.AddSingleton<IDbConfigDiagnosisAgentExecutor>(new FakeDiagnosisAgentExecutor());
+                services.AddSingleton<IDbConfigDiagnosisAgentExecutor>(new FakeDiagnosisAgentExecutor(_behavior));
                 services.RemoveAll<IMcpToolExecutionService>();
                 services.AddSingleton<IMcpToolExecutionService>(new FakeWorkflowToolExecutionService(_dbContextFactory, _behavior));
             });
@@ -577,7 +741,7 @@ public sealed class WorkflowApiTests : IClassFixture<WorkflowApiTests.WorkflowAp
 
         public async Task<Guid> SeedConnectionAsync(string name, DatabaseEngine engine)
         {
-            _behavior.ToolExecutionDelay = TimeSpan.Zero;
+            _behavior.Reset();
             await using var dbContext = _dbContextFactory.CreateDbContext();
             var connection = new McpConnectionEntity
             {
@@ -625,21 +789,46 @@ public sealed class WorkflowApiTests : IClassFixture<WorkflowApiTests.WorkflowAp
         {
             _behavior.ToolExecutionDelay = delay;
         }
+
+        public void OmitToolFields(DatabaseEngine engine, params string[] fieldNames)
+        {
+            _behavior.OmitFields(engine, fieldNames);
+        }
+
+        public void FailDiagnosis(string errorMessage)
+        {
+            _behavior.DiagnosisExceptionMessage = errorMessage;
+        }
     }
 
-    private sealed class FakeDiagnosisAgentExecutor : IDbConfigDiagnosisAgentExecutor
+    private sealed class FakeDiagnosisAgentExecutor(WorkflowTestBehavior behavior) : IDbConfigDiagnosisAgentExecutor
     {
         public string PromptVersion => "test-prompt-v1";
 
         public string ModelId => "fake-model";
 
-        public string BuildPrompt(string displayName, string databaseName, string engine, string optimizationGoal, DbConfigEvidencePack evidence)
+        public string BuildPrompt(
+            string displayName,
+            string databaseName,
+            string engine,
+            string optimizationGoal,
+            DbConfigEvidencePack evidence,
+            DiagnosisSkillDefinition? diagnosisSkill = null)
         {
             return $"fake-prompt:{displayName}:{databaseName}:{engine}:{optimizationGoal}";
         }
 
-        public Task<DbConfigDiagnosisExecutionResult> ExecuteAsync(DbConfigEvidencePack evidence, string? optimizationGoal, CancellationToken cancellationToken = default)
+        public Task<DbConfigDiagnosisExecutionResult> ExecuteAsync(
+            DbConfigEvidencePack evidence,
+            string? optimizationGoal,
+            DiagnosisSkillDefinition? diagnosisSkill = null,
+            CancellationToken cancellationToken = default)
         {
+            if (!string.IsNullOrWhiteSpace(behavior.DiagnosisExceptionMessage))
+            {
+                throw new InvalidOperationException(behavior.DiagnosisExceptionMessage);
+            }
+
             var payload = JsonSerializer.Serialize(new
             {
                 title = $"db-config report - {evidence.DatabaseName}",
@@ -655,6 +844,9 @@ public sealed class WorkflowApiTests : IClassFixture<WorkflowApiTests.WorkflowAp
                     impactSummary = item.ImpactSummary,
                     evidenceReferences = item.EvidenceReferences,
                     recommendationClass = item.RecommendationClass,
+                    recommendationType = item.RecommendationType == DbConfigRecommendationType.ActionableRecommendation
+                        ? "actionableRecommendation"
+                        : "requestMoreContext",
                     appliesWhen = item.AppliesWhen,
                     ruleId = item.RuleId,
                     ruleVersion = item.RuleVersion
@@ -711,42 +903,8 @@ public sealed class WorkflowApiTests : IClassFixture<WorkflowApiTests.WorkflowAp
             var connectionId = tool.ConnectionId;
             var connection = await dbContext.McpConnections.AsNoTracking().SingleAsync(x => x.Id == connectionId, cancellationToken);
             var responseJson = connection.Engine == DatabaseEngine.MySql
-                ? """
-                  {
-                    "content": [
-                      {
-                        "type": "text",
-                        "text": "[{\"max_connections\":300,\"innodb_buffer_pool_size\":536870912,\"thread_cache_size\":64,\"tmp_table_size\":16777216,\"max_heap_table_size\":16777216,\"slow_query_log\":0,\"long_query_time\":10,\"performance_schema_enabled\":1,\"threads_connected\":8,\"threads_running\":2,\"slow_queries\":1,\"connections\":120,\"aborted_connects\":0,\"innodb_buffer_pool_reads\":500,\"innodb_buffer_pool_read_requests\":20000,\"created_tmp_disk_tables\":12,\"created_tmp_tables\":40}]"
-                      }
-                    ]
-                  }
-                  """
-                : """
-                  {
-                    "structuredContent": [
-                      {
-                        "shared_buffers": "256MB",
-                        "work_mem": "4MB",
-                        "maintenance_work_mem": "64MB",
-                        "effective_cache_size": "1024MB",
-                        "max_connections": "200",
-                        "checkpoint_timeout": "5min",
-                        "checkpoint_completion_target": "0.5",
-                        "random_page_cost": "4.0",
-                        "seq_page_cost": "1.0",
-                        "track_io_timing": "false",
-                        "shared_preload_libraries": "",
-                        "blks_hit": "1000",
-                        "blks_read": "500",
-                        "temp_files": "42",
-                        "deadlocks": "0",
-                        "checkpoints_timed": "10",
-                        "checkpoints_req": "25",
-                        "pg_stat_statements_enabled": "false"
-                      }
-                    ]
-                  }
-                  """;
+                ? BuildMySqlResponseJson(behavior.GetOmittedFields(DatabaseEngine.MySql))
+                : BuildPostgreSqlResponseJson(behavior.GetOmittedFields(DatabaseEngine.PostgreSql));
             var entity = new McpToolExecutionEntity
             {
                 Id = Guid.NewGuid(),
@@ -767,11 +925,126 @@ public sealed class WorkflowApiTests : IClassFixture<WorkflowApiTests.WorkflowAp
 
             return new McpToolExecutionResult(entity.Id, entity.Status, entity.ResponsePayloadJson, null);
         }
+
+        private static string BuildMySqlResponseJson(IReadOnlyCollection<string> omittedFields)
+        {
+            var row = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["max_connections"] = 300,
+                ["innodb_buffer_pool_size"] = 536870912,
+                ["thread_cache_size"] = 64,
+                ["tmp_table_size"] = 16777216,
+                ["max_heap_table_size"] = 16777216,
+                ["slow_query_log"] = 0,
+                ["long_query_time"] = 10,
+                ["performance_schema_enabled"] = 1,
+                ["engine_version"] = "8.0.36",
+                ["version_comment"] = "MySQL Community Server",
+                ["database_size_bytes"] = 104857600,
+                ["parameter_apply_scope"] = "global",
+                ["threads_connected"] = 8,
+                ["threads_running"] = 2,
+                ["slow_queries"] = 1,
+                ["connections"] = 120,
+                ["aborted_connects"] = 0,
+                ["innodb_buffer_pool_reads"] = 500,
+                ["innodb_buffer_pool_read_requests"] = 20000,
+                ["created_tmp_disk_tables"] = 12,
+                ["created_tmp_tables"] = 40
+            };
+            RemoveFields(row, omittedFields);
+
+            return JsonSerializer.Serialize(new
+            {
+                content = new[]
+                {
+                    new
+                    {
+                        type = "text",
+                        text = JsonSerializer.Serialize(new[] { row })
+                    }
+                }
+            });
+        }
+
+        private static string BuildPostgreSqlResponseJson(IReadOnlyCollection<string> omittedFields)
+        {
+            var row = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["shared_buffers"] = "256MB",
+                ["work_mem"] = "4MB",
+                ["maintenance_work_mem"] = "64MB",
+                ["effective_cache_size"] = "1024MB",
+                ["max_connections"] = "200",
+                ["checkpoint_timeout"] = "5min",
+                ["checkpoint_completion_target"] = "0.5",
+                ["random_page_cost"] = "4.0",
+                ["seq_page_cost"] = "1.0",
+                ["track_io_timing"] = "false",
+                ["shared_preload_libraries"] = "",
+                ["engine_version"] = "16.3",
+                ["database_size_bytes"] = "104857600",
+                ["parameter_apply_scope"] = "instance",
+                ["blks_hit"] = "1000",
+                ["blks_read"] = "500",
+                ["temp_files"] = "42",
+                ["deadlocks"] = "0",
+                ["checkpoints_timed"] = "10",
+                ["checkpoints_req"] = "25",
+                ["pg_stat_statements_enabled"] = "false"
+            };
+            RemoveFields(row, omittedFields);
+
+            return JsonSerializer.Serialize(new
+            {
+                structuredContent = new[] { row }
+            });
+        }
+
+        private static void RemoveFields(IDictionary<string, object?> values, IReadOnlyCollection<string> omittedFields)
+        {
+            foreach (var field in omittedFields)
+            {
+                values.Remove(field);
+            }
+        }
     }
 
     private sealed class WorkflowTestBehavior
     {
         public TimeSpan ToolExecutionDelay { get; set; } = TimeSpan.Zero;
+
+        public string? DiagnosisExceptionMessage { get; set; }
+
+        private readonly HashSet<string> _omittedMySqlFields = new(StringComparer.OrdinalIgnoreCase);
+        private readonly HashSet<string> _omittedPostgreSqlFields = new(StringComparer.OrdinalIgnoreCase);
+
+        public void Reset()
+        {
+            ToolExecutionDelay = TimeSpan.Zero;
+            DiagnosisExceptionMessage = null;
+            _omittedMySqlFields.Clear();
+            _omittedPostgreSqlFields.Clear();
+        }
+
+        public void OmitFields(DatabaseEngine engine, IEnumerable<string> fieldNames)
+        {
+            var target = engine == DatabaseEngine.MySql
+                ? _omittedMySqlFields
+                : _omittedPostgreSqlFields;
+
+            foreach (var fieldName in fieldNames)
+            {
+                target.Add(fieldName);
+            }
+        }
+
+        public IReadOnlyCollection<string> GetOmittedFields(DatabaseEngine engine)
+        {
+            return engine == DatabaseEngine.MySql
+                ? _omittedMySqlFields.ToArray()
+                : _omittedPostgreSqlFields.ToArray();
+        }
     }
 
     private sealed class TestControlPlaneDbContextFactory : IDbContextFactory<ControlPlaneDbContext>

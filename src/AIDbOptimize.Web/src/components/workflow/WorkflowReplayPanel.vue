@@ -1,8 +1,12 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import type { WorkflowReplayEvent, WorkflowSessionDetail } from '../../models/workflow'
-import { extractWorkflowStructuredResult } from '../../models/workflow'
+import {
+  extractWorkflowStructuredResult,
+  summarizeWorkflowReplayEvent,
+} from '../../models/workflow'
 
-defineProps<{
+const props = defineProps<{
   session: WorkflowSessionDetail | null
   connected: boolean
   events: WorkflowReplayEvent[]
@@ -11,6 +15,9 @@ defineProps<{
 const emit = defineEmits<{
   refresh: []
 }>()
+
+const parsedReport = computed(() => extractWorkflowStructuredResult(props.session?.result) ?? null)
+const eventSummaries = computed(() => props.events.map(item => summarizeWorkflowReplayEvent(item)))
 </script>
 
 <template>
@@ -33,23 +40,42 @@ const emit = defineEmits<{
     <p v-else class="state-text">
       SSE 状态：{{ connected ? '已连接' : '未连接' }}
     </p>
-    <div v-if="extractWorkflowStructuredResult(session?.result)" class="review-summary-card compact-list">
-      <strong>{{ extractWorkflowStructuredResult(session?.result)?.title }}</strong>
-      <span>建议数：{{ extractWorkflowStructuredResult(session?.result)?.recommendations.length }}</span>
-      <span>缺失上下文：{{ extractWorkflowStructuredResult(session?.result)?.missingContextItems.length }}</span>
+    <div v-if="parsedReport" class="review-summary-card compact-list">
+      <strong>{{ parsedReport.title }}</strong>
+      <span>建议数：{{ parsedReport.recommendations.length }}</span>
+      <span>缺失上下文：{{ parsedReport.missingContextItems.length }}</span>
     </div>
     <p v-if="session && !events.length" class="state-text">
       暂无事件。
     </p>
 
-    <ol v-if="events.length" class="replay-list">
-      <li v-for="item in events" :key="`${item.sequence}-${item.eventName}`" class="replay-item">
+    <ol v-if="eventSummaries.length" class="replay-list">
+      <li v-for="item in eventSummaries" :key="`${item.sequence}-${item.eventName}`" class="replay-item">
         <div class="replay-head">
-          <strong>#{{ item.sequence }} {{ item.eventName }}</strong>
-          <span>{{ item.occurredAt || '无' }}</span>
+          <strong>#{{ item.sequence }} {{ item.title }}</strong>
+          <span>{{ item.occurredAt }}</span>
         </div>
-        <p>{{ item.message || item.eventType }}</p>
-        <pre>{{ JSON.stringify(item.payload, null, 2) }}</pre>
+        <p>{{ item.description }}</p>
+        <div v-if="item.chips.length" class="meta-chip-row">
+          <span
+            v-for="chip in item.chips"
+            :key="chip"
+            class="meta-chip"
+          >
+            {{ chip }}
+          </span>
+        </div>
+        <p
+          v-for="detail in item.detailLines"
+          :key="detail"
+          class="structured-note"
+        >
+          {{ detail }}
+        </p>
+        <details class="command-details">
+          <summary>查看事件负载</summary>
+          <pre>{{ item.rawPayloadJson }}</pre>
+        </details>
       </li>
     </ol>
   </article>

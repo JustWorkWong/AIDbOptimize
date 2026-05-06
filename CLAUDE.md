@@ -2,8 +2,8 @@
 
 ## 当前唯一执行计划
 
-- 唯一 active plan：`docs/plans/active/2026-04-aidboptimize-db-config-workflow/`
-- 唯一任务清单：`docs/plans/active/2026-04-aidboptimize-db-config-workflow/tasks.md`
+- 唯一 active plan：`docs/plans/active/2026-05-aidboptimize-workflow-skills-v1/`
+- 唯一任务清单：`docs/plans/active/2026-05-aidboptimize-workflow-skills-v1/tasks.md`
 
 ## 执行协议
 
@@ -17,9 +17,9 @@
 
 - `README.md` 只展示当前唯一执行计划。
 - `docs/README.md` 可以保留历史基线链接，但必须明确区分“当前唯一执行计划”和“历史基线”。
-- `docs/plans/README.md` 只说明计划目录规则，不能替代本文件的执行约束。
+- `docs/plans/README.md` 只说明计划目录规则，不能替代本文档的执行约束。
 
 ## 架构同步
 
 - 创建、删除、移动文件或目录时，必须同步更新对应目录下的 `CLAUDE.md`。
-- 如果本次修改影响仓库根级规则，以本文件为准。
+- 如果本次修改影响仓库根级规则，以本文档为准。

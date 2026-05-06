@@ -26,6 +26,7 @@ public sealed class RecommendationSchemaValidator
             RequireBoolean(item, "requiresMoreContext");
             RequireArray(item, "evidenceReferences");
             RequireNonEmptyString(item, "recommendationClass");
+            RequireNonEmptyString(item, "recommendationType");
             RequireNullableString(item, "impactSummary");
             RequireNullableString(item, "appliesWhen");
             RequireNullableString(item, "ruleId");

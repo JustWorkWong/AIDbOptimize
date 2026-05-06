@@ -7,7 +7,18 @@ import type {
   WorkflowSessionDetail,
   WorkflowStructuredResult,
 } from '../../models/workflow'
-import { extractWorkflowStructuredResult } from '../../models/workflow'
+import {
+  extractWorkflowCollectionPlan,
+  extractWorkflowStructuredResult,
+  formatWorkflowDateTime,
+  formatWorkflowGateStatus,
+  formatWorkflowRecommendationType,
+  formatWorkflowReviewStatus,
+  formatWorkflowSourceQuality,
+  formatWorkflowVersionTag,
+  summarizeWorkflowExecutionOverview,
+  summarizeWorkflowNodeExecution,
+} from '../../models/workflow'
 
 const props = defineProps<{
   session: WorkflowSessionDetail | null
@@ -21,6 +32,14 @@ const resultPreview = computed(() => {
 const parsedReport = computed<WorkflowStructuredResult | null>(() => {
   return props.session?.result?.parsedReport ?? extractWorkflowStructuredResult(props.session?.result) ?? null
 })
+
+const collectionPlan = computed(() => extractWorkflowCollectionPlan(parsedReport.value))
+const executionOverview = computed(() =>
+  summarizeWorkflowExecutionOverview(parsedReport.value, props.historyDetail))
+const skillSelection = computed(() => props.historyDetail?.skillSelection ?? props.session?.skillSelection ?? null)
+const capabilityResults = computed(() => collectionPlan.value?.capabilityResults.slice(0, 8) ?? [])
+const nodeExecutionSummaries = computed(() =>
+  props.historyDetail?.nodeExecutions.map(item => summarizeWorkflowNodeExecution(item)) ?? [])
 
 const hostContextItems = computed(() =>
   parsedReport.value?.evidenceItems.filter(item => item.category === 'hostContext') ?? [])
@@ -70,7 +89,55 @@ function metadataValue(name: string): WorkflowCollectionMetadata | undefined {
             <strong>宿主范围</strong>
             <span>{{ metadataValue('resource_scope')?.value || '未知' }}</span>
           </div>
+          <div class="tip-card">
+            <strong>Gate</strong>
+            <span>{{ formatWorkflowGateStatus(collectionPlan?.gateStatus) }}</span>
+          </div>
+          <div class="tip-card">
+            <strong>计划完成度</strong>
+            <span>{{ collectionPlan?.completeness || '未知' }}</span>
+          </div>
+          <div class="tip-card">
+            <strong>计划 ID</strong>
+            <span>{{ collectionPlan?.planId || '未知' }}</span>
+          </div>
         </div>
+
+        <section v-if="skillSelection" class="structured-section">
+          <h3>规则选择</h3>
+          <div class="review-detail-grid">
+            <div class="tip-card">
+              <strong>Bundle</strong>
+              <span>{{ formatWorkflowVersionTag(skillSelection.bundleId, skillSelection.bundleVersion) }}</span>
+            </div>
+            <div class="tip-card">
+              <strong>排查 skill</strong>
+              <span>{{ formatWorkflowVersionTag(skillSelection.investigationSkillId, skillSelection.investigationSkillVersion) }}</span>
+            </div>
+            <div class="tip-card">
+              <strong>诊断 skill</strong>
+              <span>{{ formatWorkflowVersionTag(skillSelection.diagnosisSkillId, skillSelection.diagnosisSkillVersion) }}</span>
+            </div>
+          </div>
+        </section>
+
+        <section v-if="executionOverview" class="structured-section">
+          <h3>执行轨迹摘要</h3>
+          <div class="review-detail-grid">
+            <div class="tip-card">
+              <strong>计划 ID</strong>
+              <span>{{ executionOverview.planId || 'n/a' }}</span>
+            </div>
+            <div class="tip-card">
+              <strong>Gate 决策</strong>
+              <span>{{ executionOverview.gateStatusLabel || 'n/a' }}</span>
+            </div>
+            <div class="tip-card">
+              <strong>采集完成度</strong>
+              <span>{{ executionOverview.collectionCompleteness || 'n/a' }}</span>
+            </div>
+          </div>
+        </section>
 
         <section v-if="parsedReport.recommendations.length" class="structured-section">
           <h3>建议详情</h3>
@@ -88,6 +155,7 @@ function metadataValue(name: string): WorkflowCollectionMetadata | undefined {
               <div class="meta-chip-row">
                 <span class="meta-chip">置信度：{{ item.confidence }}</span>
                 <span class="meta-chip">分类：{{ item.recommendationClass }}</span>
+                <span class="meta-chip">类型：{{ formatWorkflowRecommendationType(item.recommendationType) }}</span>
                 <span class="meta-chip">规则：{{ item.ruleId || '无' }}@{{ item.ruleVersion || '无' }}</span>
                 <span v-if="item.requiresMoreContext" class="meta-chip warning">需要更多上下文</span>
               </div>
@@ -100,6 +168,52 @@ function metadataValue(name: string): WorkflowCollectionMetadata | undefined {
           </div>
         </section>
 
+        <section v-if="collectionPlan" class="structured-section">
+          <h3>采集计划与执行</h3>
+          <div class="structured-columns">
+            <div>
+              <strong>计划证据引用</strong>
+              <ul class="mini-list">
+                <li v-for="item in collectionPlan.plannedSkillReferences" :key="item">
+                  {{ item }}
+                </li>
+              </ul>
+            </div>
+            <div>
+              <strong>缺失必要证据</strong>
+              <ul class="mini-list">
+                <li v-for="item in collectionPlan.missingRequiredEvidenceRefs" :key="item">
+                  {{ item }}
+                </li>
+                <li v-if="!collectionPlan.missingRequiredEvidenceRefs.length">无</li>
+              </ul>
+            </div>
+            <div>
+              <strong>缺失可选证据</strong>
+              <ul class="mini-list">
+                <li v-for="item in collectionPlan.missingOptionalEvidenceRefs" :key="item">
+                  {{ item }}
+                </li>
+                <li v-if="!collectionPlan.missingOptionalEvidenceRefs.length">无</li>
+              </ul>
+            </div>
+          </div>
+          <div v-if="capabilityResults.length" class="structured-list compact-grid">
+            <article v-for="item in capabilityResults" :key="item.capabilityId" class="structured-card">
+              <strong>{{ item.skillReference }}</strong>
+              <p>{{ item.capabilityId }}</p>
+              <div class="meta-chip-row">
+                <span class="meta-chip">{{ item.isCollected ? '已采集' : '未采集' }}</span>
+                <span class="meta-chip">{{ item.isNormalized ? '已归一化' : '未归一化' }}</span>
+                <span class="meta-chip">{{ formatWorkflowSourceQuality(item.sourceQuality) }}</span>
+              </div>
+              <p class="structured-note">错误分类：{{ item.errorClassification || 'none' }}</p>
+              <p class="structured-note">采集时间：{{ formatWorkflowDateTime(item.capturedAt) }}</p>
+              <p class="structured-note">过期时间：{{ formatWorkflowDateTime(item.expiresAt) }}</p>
+            </article>
+          </div>
+        </section>
+
         <section v-if="hostContextItems.length" class="structured-section">
           <h3>宿主上下文</h3>
           <div class="structured-list compact-grid">
@@ -108,10 +222,10 @@ function metadataValue(name: string): WorkflowCollectionMetadata | undefined {
               <p>{{ displayValue(item) }}</p>
               <div class="meta-chip-row">
                 <span class="meta-chip">{{ item.sourceScope }}</span>
-                <span class="meta-chip">{{ item.isCached ? '缓存' : '实时' }}</span>
+                <span class="meta-chip">{{ formatWorkflowSourceQuality(item.isCached ? 'cached' : 'live') }}</span>
               </div>
-              <p class="structured-note">采集时间：{{ item.capturedAt || '无' }}</p>
-              <p class="structured-note">过期时间：{{ item.expiresAt || '无' }}</p>
+              <p class="structured-note">采集时间：{{ formatWorkflowDateTime(item.capturedAt) }}</p>
+              <p class="structured-note">过期时间：{{ formatWorkflowDateTime(item.expiresAt) }}</p>
             </article>
           </div>
         </section>
@@ -138,7 +252,7 @@ function metadataValue(name: string): WorkflowCollectionMetadata | undefined {
               <ul class="mini-list">
                 <li v-for="item in configurationItems" :key="item.reference">
                   {{ item.reference }} = {{ displayValue(item) }}
-                  <span class="mini-note">· {{ item.isCached ? '缓存' : '实时' }} · {{ item.capturedAt || '无' }}</span>
+                  <span class="mini-note">· {{ formatWorkflowSourceQuality(item.isCached ? 'cached' : 'live') }} · {{ formatWorkflowDateTime(item.capturedAt) }}</span>
                 </li>
               </ul>
             </div>
@@ -147,7 +261,7 @@ function metadataValue(name: string): WorkflowCollectionMetadata | undefined {
               <ul class="mini-list">
                 <li v-for="item in runtimeItems" :key="item.reference">
                   {{ item.reference }} = {{ displayValue(item) }}
-                  <span class="mini-note">· {{ item.isCached ? '缓存' : '实时' }} · {{ item.capturedAt || '无' }}</span>
+                  <span class="mini-note">· {{ formatWorkflowSourceQuality(item.isCached ? 'cached' : 'live') }} · {{ formatWorkflowDateTime(item.capturedAt) }}</span>
                 </li>
               </ul>
             </div>
@@ -156,7 +270,7 @@ function metadataValue(name: string): WorkflowCollectionMetadata | undefined {
               <ul class="mini-list">
                 <li v-for="item in observabilityItems" :key="item.reference">
                   {{ item.reference }} = {{ displayValue(item) }}
-                  <span class="mini-note">· {{ item.isCached ? '缓存' : '实时' }} · {{ item.capturedAt || '无' }}</span>
+                  <span class="mini-note">· {{ formatWorkflowSourceQuality(item.isCached ? 'cached' : 'live') }} · {{ formatWorkflowDateTime(item.capturedAt) }}</span>
                 </li>
               </ul>
             </div>
@@ -184,15 +298,38 @@ function metadataValue(name: string): WorkflowCollectionMetadata | undefined {
         </div>
       </div>
 
+      <section v-if="nodeExecutionSummaries.length" class="structured-section">
+        <h3>节点执行审计</h3>
+        <div class="structured-list">
+          <article v-for="item in nodeExecutionSummaries" :key="item.executionId" class="structured-card">
+            <div class="structured-head">
+              <strong>{{ item.nodeLabel }}</strong>
+              <span>{{ item.statusLabel }}</span>
+            </div>
+            <p>{{ item.nodeDescription }}</p>
+            <div class="meta-chip-row">
+              <span v-for="chip in item.chips" :key="chip" class="meta-chip">
+                {{ chip }}
+              </span>
+            </div>
+            <p class="structured-note">开始时间：{{ item.startedAt }}</p>
+            <p class="structured-note">完成时间：{{ item.completedAt || 'n/a' }}</p>
+            <p v-for="detail in item.detailLines" :key="detail" class="structured-note">
+              {{ detail }}
+            </p>
+          </article>
+        </div>
+      </section>
+
       <section v-if="historyDetail?.reviews.length" class="structured-section">
         <h3>审核决策</h3>
         <div class="structured-list compact-grid">
           <article v-for="item in historyDetail.reviews" :key="item.taskId" class="structured-card">
-            <strong>{{ item.status }}</strong>
+            <strong>{{ formatWorkflowReviewStatus(item.status) }}</strong>
             <p>{{ item.comment || '无说明' }}</p>
             <div class="meta-chip-row">
               <span class="meta-chip">{{ item.reviewer || '无' }}</span>
-              <span class="meta-chip">{{ item.reviewedAt || item.createdAt }}</span>
+              <span class="meta-chip">{{ formatWorkflowDateTime(item.reviewedAt || item.createdAt) }}</span>
             </div>
           </article>
         </div>

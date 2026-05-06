@@ -11,6 +11,7 @@ AIDbOptimize.ApiService/
 ├── CLAUDE.md
 ├── AIDbOptimize.ApiService.csproj
 ├── Program.cs
+├── appsettings.json
 ├── appsettings.Local.json (local only, gitignored)
 ├── Api/
 │   ├── DataInitializationApi.cs
@@ -29,6 +30,7 @@ AIDbOptimize.ApiService/
 ## 文件用途
 
 - `Program.cs`: 组合宿主、基础设施注册、中间件与 endpoint 映射入口。
+- `appsettings.json`: 共享占位配置，保留 diagnosis agent 的 Endpoint / Model / ApiKey 键路径，默认使用占位值 `xxx`。
 - `appsettings.Local.json`: 本地私有配置，当前用于注入 DashScope/Qwen diagnosis agent 配置，不提交远程。
 - `Api/DataInitializationApi.cs`: 暴露数据初始化状态查询。
 - `Api/McpApi.cs`: 暴露 MCP 连接、工具发现、执行与审批模式更新接口。
@@ -42,3 +44,4 @@ AIDbOptimize.ApiService/
 
 - `Api/* -> Application/*`: API 层只做参数绑定和结果封装，业务逻辑下沉到应用层接口。
 - `Program.cs -> Infrastructure/*`: 运行时注册和启动任务集中在组合根，不扩散到 route builder。
+- `appsettings.Local.json -> appsettings.json`: 本地私有配置覆盖共享占位配置；diagnosis agent 的真实 `ApiKey` 应优先放在 `appsettings.Local.json`。

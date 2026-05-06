@@ -139,6 +139,7 @@ public sealed class WorkflowHistoryService(
                     session.ResultPayloadJson,
                     WorkflowResultParser.TryParse(session.ResultPayloadJson)),
             summary,
+            WorkflowResultParser.TryParseSkillSelection(session.InputPayloadJson),
             session.ErrorMessage,
             nodeExecutions,
             toolExecutions,

@@ -1,3 +1,5 @@
+using System;
+
 namespace AIDbOptimize.Infrastructure.Workflows.Pipeline;
 
 /// <summary>
@@ -13,5 +15,12 @@ public sealed class DbConfigDiagnosisAgentOptions
 
     public string ApiKey { get; init; } = string.Empty;
 
-    public bool IsConfigured => !string.IsNullOrWhiteSpace(ApiKey);
+    public bool IsConfigured => !string.IsNullOrWhiteSpace(ApiKey) && !IsPlaceholder(ApiKey);
+
+    private static bool IsPlaceholder(string apiKey)
+    {
+        return string.Equals(apiKey, "xxx", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(apiKey, "YOUR_DASHSCOPE_API_KEY", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(apiKey, "YOUR_API_KEY", StringComparison.OrdinalIgnoreCase);
+    }
 }

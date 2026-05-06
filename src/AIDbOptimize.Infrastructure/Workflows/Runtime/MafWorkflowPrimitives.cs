@@ -1,4 +1,6 @@
 using AIDbOptimize.Domain.DbConfigOptimization.Models;
+using AIDbOptimize.Infrastructure.Workflows.Pipeline;
+using AIDbOptimize.Infrastructure.Workflows.Skills;
 using Microsoft.Agents.AI.Workflows;
 
 namespace AIDbOptimize.Infrastructure.Workflows.Runtime;
@@ -11,6 +13,11 @@ public sealed record MafValidatedMessage(
     Guid SessionId,
     DbConfigWorkflowCommand Command);
 
+public sealed record MafInvestigationPlanMessage(
+    Guid SessionId,
+    DbConfigWorkflowCommand Command,
+    InvestigationPlan Plan);
+
 public sealed record MafSnapshotMessage(
     Guid SessionId,
     DbConfigWorkflowCommand Command,
@@ -20,6 +27,22 @@ public sealed record MafEvidenceMessage(
     Guid SessionId,
     DbConfigWorkflowCommand Command,
     DbConfigEvidencePack Evidence);
+
+public sealed record MafCollectedEvidenceMessage(
+    Guid SessionId,
+    DbConfigWorkflowCommand Command,
+    InvestigationPlan Plan,
+    DbConfigEvidencePack Evidence,
+    CollectionExecutionSummary Summary);
+
+public sealed record MafPolicyMessage(
+    Guid SessionId,
+    DbConfigWorkflowCommand Command,
+    InvestigationPlan Plan,
+    DbConfigEvidencePack Evidence,
+    CollectionExecutionSummary Summary,
+    SkillPolicyDecision GateDecision,
+    string BlockedReportJson);
 
 public sealed record MafDiagnosisMessage(
     Guid SessionId,

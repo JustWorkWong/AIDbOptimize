@@ -7,6 +7,10 @@ public sealed class StartDbConfigOptimizationWorkflowRequest
 {
     public string ConnectionId { get; init; } = string.Empty;
 
+    public string? BundleId { get; init; }
+
+    public string? BundleVersion { get; init; }
+
     public DbConfigWorkflowOptionsDto Options { get; init; } = new();
 
     public string RequestedBy { get; init; } = "frontend";

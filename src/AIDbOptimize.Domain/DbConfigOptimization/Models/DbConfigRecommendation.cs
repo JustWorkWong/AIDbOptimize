@@ -1,3 +1,5 @@
+using AIDbOptimize.Domain.DbConfigOptimization.Enums;
+
 namespace AIDbOptimize.Domain.DbConfigOptimization.Models;
 
 /// <summary>
@@ -15,6 +17,7 @@ public sealed record DbConfigRecommendation
         string? impactSummary = null,
         IReadOnlyList<string>? evidenceReferences = null,
         string recommendationClass = "tuning",
+        DbConfigRecommendationType recommendationType = DbConfigRecommendationType.ActionableRecommendation,
         string? appliesWhen = null,
         string? ruleId = null,
         string? ruleVersion = null)
@@ -28,6 +31,7 @@ public sealed record DbConfigRecommendation
         ImpactSummary = impactSummary;
         EvidenceReferences = evidenceReferences ?? [];
         RecommendationClass = recommendationClass;
+        RecommendationType = recommendationType;
         AppliesWhen = appliesWhen;
         RuleId = ruleId;
         RuleVersion = ruleVersion;
@@ -50,6 +54,8 @@ public sealed record DbConfigRecommendation
     public IReadOnlyList<string> EvidenceReferences { get; }
 
     public string RecommendationClass { get; }
+
+    public DbConfigRecommendationType RecommendationType { get; }
 
     public string? AppliesWhen { get; }
 

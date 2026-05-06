@@ -103,6 +103,12 @@ public sealed class MafWorkflowGraphTests
                 Guid.Parse(SessionIdText),
                 new DbConfigWorkflowCommand(
                     Guid.Parse(ConnectionIdText),
+                    "graph-probe",
+                    "1.0.0",
+                    "graph-probe-investigation",
+                    "1.0.0",
+                    "graph-probe-diagnosis",
+                    "1.0.0",
                     "tester",
                     null,
                     true,

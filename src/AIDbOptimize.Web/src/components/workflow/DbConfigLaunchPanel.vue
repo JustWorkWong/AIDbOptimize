@@ -47,7 +47,7 @@ const canSubmit = computed(() => {
             :key="connection.id"
             :value="connection.id"
           >
-            {{ connection.displayName }} · {{ connection.engine }} · {{ connection.databaseName }}
+            {{ connection.displayName }} / {{ connection.engine }} / {{ connection.databaseName }}
           </option>
         </select>
       </label>
@@ -59,6 +59,26 @@ const canSubmit = computed(() => {
           class="text-input"
           type="text"
           placeholder="frontend"
+        >
+      </label>
+
+      <label class="form-field">
+        <span>Bundle ID</span>
+        <input
+          v-model.trim="form.bundleId"
+          class="text-input"
+          type="text"
+          placeholder="留空时按引擎走默认 bundle"
+        >
+      </label>
+
+      <label class="form-field">
+        <span>Bundle Version</span>
+        <input
+          v-model.trim="form.bundleVersion"
+          class="text-input"
+          type="text"
+          placeholder="例如 1.0.0"
         >
       </label>
 

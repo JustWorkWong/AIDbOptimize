@@ -1,4 +1,5 @@
 using AIDbOptimize.Domain.DbConfigOptimization.Models;
+using AIDbOptimize.Infrastructure.Workflows.Skills;
 
 namespace AIDbOptimize.Infrastructure.Workflows.Pipeline;
 
@@ -16,11 +17,13 @@ public interface IDbConfigDiagnosisAgentExecutor
         string databaseName,
         string engine,
         string optimizationGoal,
-        DbConfigEvidencePack evidence);
+        DbConfigEvidencePack evidence,
+        DiagnosisSkillDefinition? diagnosisSkill = null);
 
     Task<DbConfigDiagnosisExecutionResult> ExecuteAsync(
         DbConfigEvidencePack evidence,
         string? optimizationGoal,
+        DiagnosisSkillDefinition? diagnosisSkill = null,
         CancellationToken cancellationToken = default);
 }
 

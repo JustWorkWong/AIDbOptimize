@@ -16,6 +16,25 @@ public sealed class DbConfigSnapshotCollectorExecutor(
     IMcpToolExecutionService toolExecutionService,
     IEnumerable<IDbConfigHostContextCollector> hostContextCollectors)
 {
+    public Task<DbConfigSnapshot> CollectAsync(
+        McpConnectionEntity connection,
+        Guid? workflowSessionId,
+        string workflowNodeName,
+        string requestedBy,
+        string? traceId,
+        DbConfigSnapshotCollectionRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        return CollectInternalAsync(
+            connection,
+            workflowSessionId,
+            workflowNodeName,
+            requestedBy,
+            traceId,
+            request,
+            cancellationToken);
+    }
+
     public async Task<DbConfigSnapshot> CollectAsync(
         McpConnectionEntity connection,
         Guid? workflowSessionId = null,
@@ -24,21 +43,44 @@ public sealed class DbConfigSnapshotCollectorExecutor(
         string? traceId = null,
         CancellationToken cancellationToken = default)
     {
+        return await CollectInternalAsync(
+            connection,
+            workflowSessionId,
+            workflowNodeName,
+            requestedBy,
+            traceId,
+            null,
+            cancellationToken);
+    }
+
+    private async Task<DbConfigSnapshot> CollectInternalAsync(
+        McpConnectionEntity connection,
+        Guid? workflowSessionId,
+        string workflowNodeName,
+        string requestedBy,
+        string? traceId,
+        DbConfigSnapshotCollectionRequest? request,
+        CancellationToken cancellationToken)
+    {
         var tools = await toolRepository.ListByConnectionAsync(connection.Id, cancellationToken);
         var selectedTool = SelectTool(tools);
         var hostContextCollector = hostContextCollectors.FirstOrDefault();
+        var includeHostContext = request?.IncludeHostContext ?? true;
+        var unavailableHostContext = includeHostContext
+            ? BuildUnavailableHostContext("No host-context collector is configured.")
+            : BuildSkippedHostContext();
 
         if (selectedTool is null)
         {
             return CreateFallbackSnapshot(
                 connection,
                 "No allowed read-only tool was discovered, using metadata fallback.",
-                BuildUnavailableHostContext("No host-context collector is configured."));
+                unavailableHostContext);
         }
 
         try
         {
-            using var document = JsonDocument.Parse(BuildPayloadJson(connection.Engine, selectedTool.ToolName));
+            using var document = JsonDocument.Parse(BuildPayloadJson(connection.Engine, selectedTool.ToolName, request));
             var result = await toolExecutionService.ExecuteAsync(
                 new McpToolExecutionRequest(
                     selectedTool.Id,
@@ -55,14 +97,18 @@ public sealed class DbConfigSnapshotCollectorExecutor(
                 return CreateFallbackSnapshot(
                     connection,
                     $"Read-only tool {selectedTool.ToolName} failed, using metadata fallback.",
-                    BuildUnavailableHostContext("Database snapshot collection failed before host-context collection."));
+                    includeHostContext
+                        ? BuildUnavailableHostContext("Database snapshot collection failed before host-context collection.")
+                        : BuildSkippedHostContext());
             }
 
             var values = ExtractValues(connection, selectedTool.ToolName, result.ResponsePayloadJson);
             var extractionMetadata = ExtractCollectionMetadata(selectedTool.ToolName, result.ResponsePayloadJson);
-            var hostContext = hostContextCollector is null
-                ? BuildUnavailableHostContext("No host-context collector is configured.")
-                : await hostContextCollector.CollectAsync(
+            var hostContext = !includeHostContext
+                ? BuildSkippedHostContext()
+                : hostContextCollector is null
+                    ? BuildUnavailableHostContext("No host-context collector is configured.")
+                    : await hostContextCollector.CollectAsync(
                     connection,
                     workflowSessionId,
                     workflowNodeName,
@@ -83,7 +129,9 @@ public sealed class DbConfigSnapshotCollectorExecutor(
             return CreateFallbackSnapshot(
                 connection,
                 $"Read-only tool collection failed, using metadata fallback. Reason: {SensitiveDataMasker.MaskFreeText(ex.Message)}",
-                BuildUnavailableHostContext("Database snapshot collection threw before host-context collection."));
+                includeHostContext
+                    ? BuildUnavailableHostContext("Database snapshot collection threw before host-context collection.")
+                    : BuildSkippedHostContext());
         }
     }
 
@@ -140,23 +188,126 @@ public sealed class DbConfigSnapshotCollectorExecutor(
         return null;
     }
 
-    private static string BuildPayloadJson(DatabaseEngine engine, string toolName)
+    private static string BuildPayloadJson(
+        DatabaseEngine engine,
+        string toolName,
+        DbConfigSnapshotCollectionRequest? request)
     {
+        var sql = BuildSelectStatement(engine, request?.RequestedValueKeys);
+        if (string.IsNullOrWhiteSpace(sql))
+        {
+            return "{}";
+        }
+
         if (string.Equals(toolName, "query", StringComparison.OrdinalIgnoreCase))
         {
-            return engine == DatabaseEngine.MySql
-                ? """{"sql":"SELECT @@max_connections AS max_connections, @@innodb_buffer_pool_size AS innodb_buffer_pool_size, @@thread_cache_size AS thread_cache_size, @@tmp_table_size AS tmp_table_size, @@max_heap_table_size AS max_heap_table_size, @@slow_query_log AS slow_query_log, @@long_query_time AS long_query_time, @@performance_schema AS performance_schema_enabled, (SELECT VARIABLE_VALUE FROM performance_schema.global_status WHERE VARIABLE_NAME='Threads_connected') AS threads_connected, (SELECT VARIABLE_VALUE FROM performance_schema.global_status WHERE VARIABLE_NAME='Threads_running') AS threads_running, (SELECT VARIABLE_VALUE FROM performance_schema.global_status WHERE VARIABLE_NAME='Slow_queries') AS slow_queries, (SELECT VARIABLE_VALUE FROM performance_schema.global_status WHERE VARIABLE_NAME='Connections') AS connections, (SELECT VARIABLE_VALUE FROM performance_schema.global_status WHERE VARIABLE_NAME='Aborted_connects') AS aborted_connects, (SELECT VARIABLE_VALUE FROM performance_schema.global_status WHERE VARIABLE_NAME='Innodb_buffer_pool_reads') AS innodb_buffer_pool_reads, (SELECT VARIABLE_VALUE FROM performance_schema.global_status WHERE VARIABLE_NAME='Innodb_buffer_pool_read_requests') AS innodb_buffer_pool_read_requests, (SELECT VARIABLE_VALUE FROM performance_schema.global_status WHERE VARIABLE_NAME='Created_tmp_disk_tables') AS created_tmp_disk_tables, (SELECT VARIABLE_VALUE FROM performance_schema.global_status WHERE VARIABLE_NAME='Created_tmp_tables') AS created_tmp_tables"}"""
-                : """{"sql":"SELECT current_setting('shared_buffers') AS shared_buffers, current_setting('work_mem') AS work_mem, current_setting('maintenance_work_mem') AS maintenance_work_mem, current_setting('effective_cache_size') AS effective_cache_size, current_setting('max_connections') AS max_connections, current_setting('checkpoint_timeout') AS checkpoint_timeout, current_setting('checkpoint_completion_target') AS checkpoint_completion_target, current_setting('random_page_cost') AS random_page_cost, current_setting('seq_page_cost') AS seq_page_cost, current_setting('track_io_timing', true) AS track_io_timing, current_setting('shared_preload_libraries', true) AS shared_preload_libraries, stats.blks_hit AS blks_hit, stats.blks_read AS blks_read, stats.temp_files AS temp_files, stats.deadlocks AS deadlocks, bgw.checkpoints_timed AS checkpoints_timed, bgw.checkpoints_req AS checkpoints_req, EXISTS (SELECT 1 FROM pg_extension WHERE extname='pg_stat_statements') AS pg_stat_statements_enabled FROM pg_stat_database AS stats CROSS JOIN pg_stat_bgwriter AS bgw WHERE stats.datname = current_database() LIMIT 1"}""";
+            return JsonSerializer.Serialize(new { sql });
         }
 
         if (string.Equals(toolName, "execute_query", StringComparison.OrdinalIgnoreCase))
         {
-            return engine == DatabaseEngine.MySql
-                ? """{"query":"SELECT @@max_connections AS max_connections, @@innodb_buffer_pool_size AS innodb_buffer_pool_size, @@thread_cache_size AS thread_cache_size, @@tmp_table_size AS tmp_table_size, @@max_heap_table_size AS max_heap_table_size, @@slow_query_log AS slow_query_log, @@long_query_time AS long_query_time, @@performance_schema AS performance_schema_enabled, (SELECT VARIABLE_VALUE FROM performance_schema.global_status WHERE VARIABLE_NAME='Threads_connected') AS threads_connected, (SELECT VARIABLE_VALUE FROM performance_schema.global_status WHERE VARIABLE_NAME='Threads_running') AS threads_running, (SELECT VARIABLE_VALUE FROM performance_schema.global_status WHERE VARIABLE_NAME='Slow_queries') AS slow_queries, (SELECT VARIABLE_VALUE FROM performance_schema.global_status WHERE VARIABLE_NAME='Connections') AS connections, (SELECT VARIABLE_VALUE FROM performance_schema.global_status WHERE VARIABLE_NAME='Aborted_connects') AS aborted_connects, (SELECT VARIABLE_VALUE FROM performance_schema.global_status WHERE VARIABLE_NAME='Innodb_buffer_pool_reads') AS innodb_buffer_pool_reads, (SELECT VARIABLE_VALUE FROM performance_schema.global_status WHERE VARIABLE_NAME='Innodb_buffer_pool_read_requests') AS innodb_buffer_pool_read_requests, (SELECT VARIABLE_VALUE FROM performance_schema.global_status WHERE VARIABLE_NAME='Created_tmp_disk_tables') AS created_tmp_disk_tables, (SELECT VARIABLE_VALUE FROM performance_schema.global_status WHERE VARIABLE_NAME='Created_tmp_tables') AS created_tmp_tables"}"""
-                : """{"query":"SELECT current_setting('shared_buffers') AS shared_buffers, current_setting('work_mem') AS work_mem, current_setting('maintenance_work_mem') AS maintenance_work_mem, current_setting('effective_cache_size') AS effective_cache_size, current_setting('max_connections') AS max_connections, current_setting('checkpoint_timeout') AS checkpoint_timeout, current_setting('checkpoint_completion_target') AS checkpoint_completion_target, current_setting('random_page_cost') AS random_page_cost, current_setting('seq_page_cost') AS seq_page_cost, current_setting('track_io_timing', true) AS track_io_timing, current_setting('shared_preload_libraries', true) AS shared_preload_libraries, stats.blks_hit AS blks_hit, stats.blks_read AS blks_read, stats.temp_files AS temp_files, stats.deadlocks AS deadlocks, bgw.checkpoints_timed AS checkpoints_timed, bgw.checkpoints_req AS checkpoints_req, EXISTS (SELECT 1 FROM pg_extension WHERE extname='pg_stat_statements') AS pg_stat_statements_enabled FROM pg_stat_database AS stats CROSS JOIN pg_stat_bgwriter AS bgw WHERE stats.datname = current_database() LIMIT 1"}""";
+            return JsonSerializer.Serialize(new { query = sql });
         }
 
         return "{}";
+    }
+
+    private static string BuildSelectStatement(
+        DatabaseEngine engine,
+        IReadOnlyCollection<string>? requestedValueKeys)
+    {
+        var requestedKeys = (requestedValueKeys is { Count: > 0 } ? requestedValueKeys : GetDefaultRequestedValueKeys(engine))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var selectedExpressions = GetProjectionOrder(engine)
+            .Where(requestedKeys.Contains)
+            .Select(key => $"{GetProjectionExpression(engine, key)} AS {key}")
+            .ToArray();
+
+        if (selectedExpressions.Length == 0)
+        {
+            selectedExpressions =
+            [
+                $"{GetProjectionExpression(engine, "engine_version")} AS engine_version",
+                $"{GetProjectionExpression(engine, "parameter_apply_scope")} AS parameter_apply_scope"
+            ];
+        }
+
+        var selectList = string.Join(", ", selectedExpressions);
+        return engine == DatabaseEngine.MySql
+            ? $"SELECT {selectList}"
+            : $"SELECT {selectList} FROM pg_stat_database AS stats CROSS JOIN pg_stat_bgwriter AS bgw WHERE stats.datname = current_database() LIMIT 1";
+    }
+
+    private static IReadOnlyCollection<string> GetDefaultRequestedValueKeys(DatabaseEngine engine)
+    {
+        return engine == DatabaseEngine.MySql
+            ? MySqlProjectionOrder
+            : PostgreSqlProjectionOrder;
+    }
+
+    private static IReadOnlyCollection<string> GetProjectionOrder(DatabaseEngine engine)
+    {
+        return engine == DatabaseEngine.MySql
+            ? MySqlProjectionOrder
+            : PostgreSqlProjectionOrder;
+    }
+
+    private static string GetProjectionExpression(DatabaseEngine engine, string key)
+    {
+        return engine switch
+        {
+            DatabaseEngine.MySql => key switch
+            {
+                "max_connections" => "@@max_connections",
+                "innodb_buffer_pool_size" => "@@innodb_buffer_pool_size",
+                "thread_cache_size" => "@@thread_cache_size",
+                "tmp_table_size" => "@@tmp_table_size",
+                "max_heap_table_size" => "@@max_heap_table_size",
+                "slow_query_log" => "@@slow_query_log",
+                "long_query_time" => "@@long_query_time",
+                "performance_schema_enabled" => "@@performance_schema",
+                "engine_version" => "VERSION()",
+                "version_comment" => "@@version_comment",
+                "database_size_bytes" => "COALESCE((SELECT SUM(data_length + index_length) FROM information_schema.tables WHERE table_schema = DATABASE()), 0)",
+                "parameter_apply_scope" => "'global'",
+                "threads_connected" => "(SELECT VARIABLE_VALUE FROM performance_schema.global_status WHERE VARIABLE_NAME='Threads_connected')",
+                "threads_running" => "(SELECT VARIABLE_VALUE FROM performance_schema.global_status WHERE VARIABLE_NAME='Threads_running')",
+                "slow_queries" => "(SELECT VARIABLE_VALUE FROM performance_schema.global_status WHERE VARIABLE_NAME='Slow_queries')",
+                "connections" => "(SELECT VARIABLE_VALUE FROM performance_schema.global_status WHERE VARIABLE_NAME='Connections')",
+                "aborted_connects" => "(SELECT VARIABLE_VALUE FROM performance_schema.global_status WHERE VARIABLE_NAME='Aborted_connects')",
+                "innodb_buffer_pool_reads" => "(SELECT VARIABLE_VALUE FROM performance_schema.global_status WHERE VARIABLE_NAME='Innodb_buffer_pool_reads')",
+                "innodb_buffer_pool_read_requests" => "(SELECT VARIABLE_VALUE FROM performance_schema.global_status WHERE VARIABLE_NAME='Innodb_buffer_pool_read_requests')",
+                "created_tmp_disk_tables" => "(SELECT VARIABLE_VALUE FROM performance_schema.global_status WHERE VARIABLE_NAME='Created_tmp_disk_tables')",
+                "created_tmp_tables" => "(SELECT VARIABLE_VALUE FROM performance_schema.global_status WHERE VARIABLE_NAME='Created_tmp_tables')",
+                _ => throw new InvalidOperationException($"Unsupported MySQL projection key `{key}`.")
+            },
+            DatabaseEngine.PostgreSql => key switch
+            {
+                "shared_buffers" => "current_setting('shared_buffers')",
+                "work_mem" => "current_setting('work_mem')",
+                "maintenance_work_mem" => "current_setting('maintenance_work_mem')",
+                "effective_cache_size" => "current_setting('effective_cache_size')",
+                "max_connections" => "current_setting('max_connections')",
+                "checkpoint_timeout" => "current_setting('checkpoint_timeout')",
+                "checkpoint_completion_target" => "current_setting('checkpoint_completion_target')",
+                "random_page_cost" => "current_setting('random_page_cost')",
+                "seq_page_cost" => "current_setting('seq_page_cost')",
+                "track_io_timing" => "current_setting('track_io_timing', true)",
+                "shared_preload_libraries" => "current_setting('shared_preload_libraries', true)",
+                "engine_version" => "current_setting('server_version')",
+                "database_size_bytes" => "pg_database_size(current_database())",
+                "parameter_apply_scope" => "'instance'",
+                "blks_hit" => "stats.blks_hit",
+                "blks_read" => "stats.blks_read",
+                "temp_files" => "stats.temp_files",
+                "deadlocks" => "stats.deadlocks",
+                "checkpoints_timed" => "bgw.checkpoints_timed",
+                "checkpoints_req" => "bgw.checkpoints_req",
+                "pg_stat_statements_enabled" => "EXISTS (SELECT 1 FROM pg_extension WHERE extname='pg_stat_statements')",
+                _ => throw new InvalidOperationException($"Unsupported PostgreSQL projection key `{key}`.")
+            },
+            _ => throw new InvalidOperationException($"Unsupported engine `{engine}`.")
+        };
     }
 
     private static DbConfigSnapshot BuildSnapshot(
@@ -495,6 +646,19 @@ public sealed class DbConfigSnapshotCollectorExecutor(
             []);
     }
 
+    private static DbConfigHostContextCollectionResult BuildSkippedHostContext()
+    {
+        return new DbConfigHostContextCollectionResult(
+            "workflow-skipped",
+            [],
+            [],
+            [
+                new DbConfigCollectionMetadataItem("resource_scope", "workflow-skipped", "Host context collection was skipped because the planner did not request a host-context capability."),
+                new DbConfigCollectionMetadataItem("host_context_status", "skipped", "Host context collection was skipped by the investigation plan.")
+            ],
+            []);
+    }
+
     private static bool TryClassifyKey(DatabaseEngine engine, string key, out string category)
     {
         if (ObservabilityKeys.Contains(key))
@@ -563,6 +727,11 @@ public sealed class DbConfigSnapshotCollectorExecutor(
         "max_heap_table_size",
         "slow_query_log",
         "long_query_time"
+        ,
+        "engine_version",
+        "version_comment",
+        "database_size_bytes",
+        "parameter_apply_scope"
     };
 
     private static readonly HashSet<string> MySqlRuntimeKeys = new(StringComparer.OrdinalIgnoreCase)
@@ -589,6 +758,10 @@ public sealed class DbConfigSnapshotCollectorExecutor(
         "checkpoint_completion_target",
         "random_page_cost",
         "seq_page_cost"
+        ,
+        "engine_version",
+        "database_size_bytes",
+        "parameter_apply_scope"
     };
 
     private static readonly HashSet<string> PostgreSqlRuntimeKeys = new(StringComparer.OrdinalIgnoreCase)
@@ -609,7 +782,62 @@ public sealed class DbConfigSnapshotCollectorExecutor(
         "shared_preload_libraries"
     };
 
+    private static readonly string[] MySqlProjectionOrder =
+    [
+        "max_connections",
+        "innodb_buffer_pool_size",
+        "thread_cache_size",
+        "tmp_table_size",
+        "max_heap_table_size",
+        "slow_query_log",
+        "long_query_time",
+        "performance_schema_enabled",
+        "engine_version",
+        "version_comment",
+        "database_size_bytes",
+        "parameter_apply_scope",
+        "threads_connected",
+        "threads_running",
+        "slow_queries",
+        "connections",
+        "aborted_connects",
+        "innodb_buffer_pool_reads",
+        "innodb_buffer_pool_read_requests",
+        "created_tmp_disk_tables",
+        "created_tmp_tables"
+    ];
+
+    private static readonly string[] PostgreSqlProjectionOrder =
+    [
+        "shared_buffers",
+        "work_mem",
+        "maintenance_work_mem",
+        "effective_cache_size",
+        "max_connections",
+        "checkpoint_timeout",
+        "checkpoint_completion_target",
+        "random_page_cost",
+        "seq_page_cost",
+        "track_io_timing",
+        "shared_preload_libraries",
+        "engine_version",
+        "database_size_bytes",
+        "parameter_apply_scope",
+        "blks_hit",
+        "blks_read",
+        "temp_files",
+        "deadlocks",
+        "checkpoints_timed",
+        "checkpoints_req",
+        "pg_stat_statements_enabled"
+    ];
+
     private readonly record struct DbConfigTableSummary(
         int RowCount,
         string SummaryJson);
 }
+
+public sealed record DbConfigSnapshotCollectionRequest(
+    IReadOnlyCollection<string> CollectorKeys,
+    IReadOnlyCollection<string> RequestedValueKeys,
+    bool IncludeHostContext);

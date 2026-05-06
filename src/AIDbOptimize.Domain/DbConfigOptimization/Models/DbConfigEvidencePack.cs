@@ -19,7 +19,8 @@ public sealed record DbConfigEvidencePack
         IReadOnlyList<DbConfigEvidenceItem>? hostContextItems = null,
         IReadOnlyList<DbConfigEvidenceItem>? observabilityItems = null,
         IReadOnlyList<DbConfigMissingContextItem>? missingContextItems = null,
-        IReadOnlyList<DbConfigCollectionMetadataItem>? collectionMetadata = null)
+        IReadOnlyList<DbConfigCollectionMetadataItem>? collectionMetadata = null,
+        IReadOnlyList<DbConfigEvidenceItem>? externalKnowledgeItems = null)
     {
         Engine = engine;
         DatabaseName = databaseName;
@@ -33,6 +34,7 @@ public sealed record DbConfigEvidencePack
         ObservabilityItems = observabilityItems ?? [];
         MissingContextItems = missingContextItems ?? [];
         CollectionMetadata = collectionMetadata ?? [];
+        ExternalKnowledgeItems = externalKnowledgeItems ?? [];
     }
 
     public DatabaseEngine Engine { get; }
@@ -58,4 +60,6 @@ public sealed record DbConfigEvidencePack
     public IReadOnlyList<DbConfigMissingContextItem> MissingContextItems { get; }
 
     public IReadOnlyList<DbConfigCollectionMetadataItem> CollectionMetadata { get; }
+
+    public IReadOnlyList<DbConfigEvidenceItem> ExternalKnowledgeItems { get; }
 }

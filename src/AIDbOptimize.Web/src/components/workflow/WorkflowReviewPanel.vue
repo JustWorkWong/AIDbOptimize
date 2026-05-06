@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import type { ReviewTaskDetail, WorkflowSessionDetail } from '../../models/workflow'
-import { extractWorkflowStructuredResult } from '../../models/workflow'
+import {
+  extractWorkflowStructuredResult,
+  formatWorkflowRecommendationType,
+  formatWorkflowStatus,
+} from '../../models/workflow'
 
 defineProps<{
   session: WorkflowSessionDetail | null
@@ -42,8 +46,11 @@ function parsedReviewReport(review: ReviewTaskDetail | null) {
     <template v-if="session && review">
       <div class="review-summary-card">
         <strong>{{ review.title }}</strong>
-        <span>状态：{{ review.status }}</span>
+        <span>状态：{{ formatWorkflowStatus(review.status) }}</span>
         <span>会话：{{ session.sessionId }}</span>
+        <span v-if="session.skillSelection">
+          {{ session.skillSelection.bundleId }}@{{ session.skillSelection.bundleVersion }}
+        </span>
       </div>
 
       <div v-if="parsedReviewReport(review)" class="structured-report">
@@ -74,9 +81,11 @@ function parsedReviewReport(review: ReviewTaskDetail | null) {
             </div>
             <p>{{ item.suggestion }}</p>
             <div class="meta-chip-row">
-              <span class="meta-chip">confidence: {{ item.confidence }}</span>
-              <span class="meta-chip">class: {{ item.recommendationClass }}</span>
-              <span class="meta-chip">rule: {{ item.ruleId || 'n/a' }}@{{ item.ruleVersion || 'n/a' }}</span>
+              <span class="meta-chip">置信度：{{ item.confidence }}</span>
+              <span class="meta-chip">分类：{{ item.recommendationClass }}</span>
+              <span class="meta-chip">类型：{{ formatWorkflowRecommendationType(item.recommendationType) }}</span>
+              <span class="meta-chip">规则：{{ item.ruleId || '无' }}@{{ item.ruleVersion || '无' }}</span>
+              <span v-if="item.requiresMoreContext" class="meta-chip warning">需要更多上下文</span>
             </div>
             <p v-if="item.appliesWhen" class="structured-note">适用前提：{{ item.appliesWhen }}</p>
             <p v-if="item.evidenceReferences.length" class="structured-note">
