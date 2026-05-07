@@ -1,22 +1,23 @@
 # E:\Db 执行约束
 
-## 当前唯一执行计划
+## 当前默认基线
 
-- 唯一 active plan：`docs/plans/active/2026-05-aidboptimize-workflow-skills-v1/`
-- 唯一任务清单：`docs/plans/active/2026-05-aidboptimize-workflow-skills-v1/tasks.md`
+- 最近完成计划：`docs/plans/active/2026-05-aidboptimize-workflow-skills-v1/`
+- 默认基线任务清单：`docs/plans/active/2026-05-aidboptimize-workflow-skills-v1/tasks.md`
+- 当前没有新的未完成执行计划；上面这组文档用于描述最近一次已经落地的实现基线
 
 ## 执行协议
 
-1. 任何实现工作都必须先读取当前 plan 的 `tasks.md`，并且只处理未勾选任务。
-2. 一次只允许推进一个明确任务；如果用户没有额外指定，默认选择当前阶段最靠前的一个未完成项。
-3. 不允许因为“顺手”而扩展到任务清单外的模块、接口或前端区域。
-4. 如果发现设计、依赖或上下文不足，先更新 `tasks.md` 记录阻塞或缺口，再停止编码并汇报。
-5. 完成任务后，先更新 `tasks.md` 的勾选状态与必要备注，再继续下一个任务。
+1. 任何实现工作都必须先读取本文件指向的 plan 与 `tasks.md`，判断它是“未完成执行计划”还是“默认实现基线”。
+2. 如果 plan 里仍有未勾选任务，只允许处理这些未完成项。
+3. 如果 plan 已全部完成，则把它当默认基线；新的中大型 feature / refactor 必须先补新 plan，再开始实现。
+4. 不允许因为“顺手”而扩展到明确范围之外的模块、接口或前端区域。
+5. 如果发现设计、依赖或上下文不足，先更新对应 plan 的 `tasks.md` 或新增计划文档记录缺口，再停止编码并汇报。
 
 ## 文档入口
 
-- `README.md` 只展示当前唯一执行计划。
-- `docs/README.md` 可以保留历史基线链接，但必须明确区分“当前唯一执行计划”和“历史基线”。
+- `README.md` 只展示当前验证快照、默认基线和启动入口。
+- `docs/README.md` 可以保留历史基线链接，但必须明确区分“当前未完成计划（若有）”、“默认基线”和“历史基线”。
 - `docs/plans/README.md` 只说明计划目录规则，不能替代本文档的执行约束。
 
 ## 架构同步

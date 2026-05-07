@@ -7,6 +7,7 @@
 - 使用 Aspire 统一编排后端 API、前端 Vite 应用和基础设施容器
 - 提供 `PostgreSQL`、`MySQL`、`Redis`、`RabbitMQ`
 - 数据库配置优化 workflow 的发起、review、resume、recovery、history 和 SSE 事件流
+- `workflow skills v1` 主链：bundle/version 解析、investigation / diagnosis skill、planner、collection subworkflow、policy gate
 - MCP 连接管理、工具发现、工具执行和 workflow 只读采集链路
 - 控制面持久化、agent session 审计和前端工作台
 - 所有资源使用固定端口，并保留本地管理入口
@@ -18,11 +19,19 @@
 - [docs/README.md](./docs/README.md)
 - [Workflow 后端代码流程说明](./docs/workflow/README.md)
 
-当前唯一执行计划：
+最近完成计划（当前默认基线）：
 
 - [workflow skills v1 方案](./docs/plans/active/2026-05-aidboptimize-workflow-skills-v1/design.md)
 - [workflow skills v1 详细方案](./docs/plans/active/2026-05-aidboptimize-workflow-skills-v1/detailed-design.md)
 - [workflow skills v1 任务清单](./docs/plans/active/2026-05-aidboptimize-workflow-skills-v1/tasks.md)
+
+当前没有新的未完成 active plan；上面这组文档用于描述最近一次已经落地的实现基线。
+
+## 当前验证快照（2026-05-07）
+
+- `workflow skills v1` 已进入真实 workflow 主链，`RAG` 仍然只保留协议与扩展位
+- `dotnet test .\AIDbOptimize.slnx --no-restore` 通过，当前共 `84` 个测试
+- `npm run build` (`src/AIDbOptimize.Web`) 通过
 
 ## 启动方式
 
@@ -63,7 +72,9 @@ dotnet run --project .\src\AIDbOptimize.AppHost\AIDbOptimize.AppHost.csproj
 
 - 基础设施编排与固定端口本地开发环境
 - db-config workflow 后端 runtime、review / resume、history / replay、SSE 事件流
+- workflow skills v1：bundle/version 解析、skill 驱动的采集规划、policy gate、`recommendationType`
 - MCP 控制面、工具执行审计与 agent 持久化
 - 对应测试工程与前端工作台
+- `RAG` 仅预留未来插入位，尚未接入真实 retrieval
 
-后续执行顺序以仓库根 [CLAUDE.md](./CLAUDE.md) 和当前唯一任务清单为准。
+后续如进入新一轮中大型需求，以仓库根 [CLAUDE.md](./CLAUDE.md) 为准：先建立新 plan，再切换默认执行指针。

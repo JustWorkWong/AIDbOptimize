@@ -14,6 +14,13 @@
 - [workflow skills v1 详细方案](../plans/active/2026-05-aidboptimize-workflow-skills-v1/detailed-design.md)
 - [workflow skills v1 任务清单](../plans/active/2026-05-aidboptimize-workflow-skills-v1/tasks.md)
 
+## 当前验证快照（2026-05-07）
+
+- `workflow skills v1` 已经进入真实 start / resume / recovery 主链，不再只是设计稿
+- `RAG` 仍然只保留扩展位，没有接入真实 retrieval、知识注入或外部裁决
+- `dotnet test .\AIDbOptimize.slnx --no-restore` 通过，当前共 `84` 个测试
+- `npm run build` (`src/AIDbOptimize.Web`) 通过
+
 ## 1. skills 与 RAG 边界
 
 `docs/workflow/skills/` 已经是 workflow 规则资产的长期落点，当前仓库已经落地：
