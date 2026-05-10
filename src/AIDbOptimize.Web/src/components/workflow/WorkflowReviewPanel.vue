@@ -91,6 +91,9 @@ function parsedReviewReport(review: ReviewTaskDetail | null) {
             <p v-if="item.evidenceReferences.length" class="structured-note">
               证据引用：{{ item.evidenceReferences.join(', ') }}
             </p>
+            <p v-if="item.externalKnowledgeCitations.length" class="structured-note">
+              外部知识引用：{{ item.externalKnowledgeCitations.join(' ; ') }}
+            </p>
           </article>
         </div>
       </div>

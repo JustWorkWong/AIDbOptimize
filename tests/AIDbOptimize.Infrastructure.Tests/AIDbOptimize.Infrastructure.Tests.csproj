@@ -22,4 +22,10 @@
     <ProjectReference Include="..\..\src\AIDbOptimize.Infrastructure\AIDbOptimize.Infrastructure.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Update="Fixtures\Rag\**\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
 </Project>

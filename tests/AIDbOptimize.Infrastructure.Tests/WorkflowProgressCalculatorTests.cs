@@ -14,4 +14,14 @@ public sealed class WorkflowProgressCalculatorTests
 
         Assert.Equal(55, progress);
     }
+
+    [Fact]
+    public void GetProgressPercent_ReturnsStableProgress_ForWorkflowRagContextAssemblerNode()
+    {
+        var progress = WorkflowProgressCalculator.GetProgressPercent(
+            "WorkflowRagContextAssembler",
+            "Running");
+
+        Assert.Equal(62, progress);
+    }
 }

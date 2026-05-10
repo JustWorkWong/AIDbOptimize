@@ -70,4 +70,8 @@ public sealed class WorkflowSessionEntity
     public ICollection<AgentMessageEntity> AgentMessages { get; set; } = [];
 
     public ICollection<McpToolExecutionEntity> ToolExecutions { get; set; } = [];
+
+    public ICollection<RagRetrievalSnapshotEntity> RagRetrievalSnapshots { get; set; } = [];
+
+    public ICollection<RagCaseRecordEntity> RagCaseRecords { get; set; } = [];
 }

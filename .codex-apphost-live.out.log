@@ -1,0 +1,12 @@
+从 .\src\AIDbOptimize.AppHost\Properties\launchSettings.json 使用启动设置...
+正在生成...
+info: Aspire.Hosting.DistributedApplication[0]
+      Aspire version: 13.2.2+25961cf7043e413abaf8ad84348988f2904b90d5
+info: Aspire.Hosting.DistributedApplication[0]
+      Distributed application starting.
+info: Aspire.Hosting.DistributedApplication[0]
+      Application host directory is: E:\Db\src\AIDbOptimize.AppHost
+info: Aspire.Hosting.DistributedApplication[0]
+      Now listening on: http://localhost:17200
+info: Aspire.Hosting.DistributedApplication[0]
+      Login to the dashboard at http://localhost:17200/login?t=67b8303777394b463bd6c5897be18ca3

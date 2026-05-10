@@ -26,6 +26,8 @@ var postgres = builder.AddPostgres(
         userName: postgresUser,
         password: postgresPassword,
         port: settings.Infrastructure.PostgreSql.Port)
+    .WithImage("pgvector/pgvector")
+    .WithImageTag("pg17")
     .WithLifetime(ContainerLifetime.Persistent)
     .WithDataVolume()
     .WithPgAdmin(pgAdmin =>

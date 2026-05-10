@@ -3,6 +3,7 @@ using AIDbOptimize.Domain.Mcp.Enums;
 using AIDbOptimize.Domain.Seed.Enums;
 using AIDbOptimize.Infrastructure.Persistence.Entities;
 using Microsoft.EntityFrameworkCore;
+using Pgvector.EntityFrameworkCore;
 
 namespace AIDbOptimize.Infrastructure.Persistence;
 
@@ -23,9 +24,15 @@ public sealed class ControlPlaneDbContext(DbContextOptions<ControlPlaneDbContext
     public DbSet<AgentSummaryEntity> AgentSummaries => Set<AgentSummaryEntity>();
     public DbSet<AgentMessageEntity> AgentMessages => Set<AgentMessageEntity>();
     public DbSet<DataInitializationRunEntity> DataInitializationRuns => Set<DataInitializationRunEntity>();
+    public DbSet<RagDocumentEntity> RagDocuments => Set<RagDocumentEntity>();
+    public DbSet<RagDocumentChunkEntity> RagDocumentChunks => Set<RagDocumentChunkEntity>();
+    public DbSet<RagCaseRecordEntity> RagCaseRecords => Set<RagCaseRecordEntity>();
+    public DbSet<RagCaseEvidenceLinkEntity> RagCaseEvidenceLinks => Set<RagCaseEvidenceLinkEntity>();
+    public DbSet<RagRetrievalSnapshotEntity> RagRetrievalSnapshots => Set<RagRetrievalSnapshotEntity>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.HasPostgresExtension("vector");
         ConfigureMcpConnections(modelBuilder);
         ConfigureMcpTools(modelBuilder);
         ConfigureMcpToolExecutions(modelBuilder);
@@ -38,6 +45,11 @@ public sealed class ControlPlaneDbContext(DbContextOptions<ControlPlaneDbContext
         ConfigureAgentSummaries(modelBuilder);
         ConfigureAgentMessages(modelBuilder);
         ConfigureDataInitializationRuns(modelBuilder);
+        ConfigureRagDocuments(modelBuilder);
+        ConfigureRagDocumentChunks(modelBuilder);
+        ConfigureRagCaseRecords(modelBuilder);
+        ConfigureRagCaseEvidenceLinks(modelBuilder);
+        ConfigureRagRetrievalSnapshots(modelBuilder);
     }
 
     private static void ConfigureMcpConnections(ModelBuilder modelBuilder)
@@ -298,5 +310,104 @@ public sealed class ControlPlaneDbContext(DbContextOptions<ControlPlaneDbContext
         init.Property(x => x.SeedVersion).HasMaxLength(50).IsRequired();
         init.Property(x => x.State).HasConversion<string>().HasMaxLength(20);
         init.HasIndex(x => new { x.Engine, x.DatabaseName, x.SeedVersion }).IsUnique();
+    }
+
+    private static void ConfigureRagDocuments(ModelBuilder modelBuilder)
+    {
+        var document = modelBuilder.Entity<RagDocumentEntity>();
+        document.ToTable("rag_documents");
+        document.HasKey(x => x.Id);
+        document.Property(x => x.DocumentType).HasConversion<string>().HasMaxLength(20);
+        document.Property(x => x.Engine).HasMaxLength(20).IsRequired();
+        document.Property(x => x.Vendor).HasMaxLength(40).IsRequired();
+        document.Property(x => x.Topic).HasMaxLength(40).IsRequired();
+        document.Property(x => x.SourcePath).HasMaxLength(300).IsRequired();
+        document.Property(x => x.SourceTitle).HasMaxLength(300).IsRequired();
+        document.Property(x => x.ContentHash).HasMaxLength(128).IsRequired();
+        document.HasIndex(x => x.SourcePath)
+            .IsUnique()
+            .HasDatabaseName("idx_rag_documents_source_path");
+        document.HasIndex(x => new { x.Engine, x.Vendor, x.Topic })
+            .HasDatabaseName("idx_rag_documents_engine_vendor_topic");
+    }
+
+    private void ConfigureRagDocumentChunks(ModelBuilder modelBuilder)
+    {
+        var chunk = modelBuilder.Entity<RagDocumentChunkEntity>();
+        chunk.ToTable("rag_document_chunks");
+        chunk.HasKey(x => x.Id);
+        chunk.Property(x => x.ChunkKey).HasMaxLength(200).IsRequired();
+        chunk.Property(x => x.Title).HasMaxLength(300).IsRequired();
+        chunk.Property(x => x.SectionPath).HasMaxLength(500).IsRequired();
+        chunk.Property(x => x.ProductVersion).HasMaxLength(100);
+        chunk.Property(x => x.AppliesTo).HasMaxLength(200);
+        if (Database.ProviderName?.Contains("InMemory", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            chunk.Ignore(x => x.Embedding);
+        }
+        else
+        {
+            chunk.Property(x => x.Embedding).HasColumnType("vector");
+        }
+        chunk.HasIndex(x => new { x.DocumentId, x.ChunkKey })
+            .IsUnique()
+            .HasDatabaseName("idx_rag_document_chunks_document_chunk_key");
+        chunk.HasOne(x => x.Document)
+            .WithMany(x => x.Chunks)
+            .HasForeignKey(x => x.DocumentId)
+            .OnDelete(DeleteBehavior.Cascade);
+    }
+
+    private static void ConfigureRagCaseRecords(ModelBuilder modelBuilder)
+    {
+        var caseRecord = modelBuilder.Entity<RagCaseRecordEntity>();
+        caseRecord.ToTable("rag_case_records");
+        caseRecord.HasKey(x => x.Id);
+        caseRecord.Property(x => x.Engine).HasMaxLength(20).IsRequired();
+        caseRecord.Property(x => x.ProblemType).HasMaxLength(80).IsRequired();
+        caseRecord.Property(x => x.Outcome).HasMaxLength(40).IsRequired();
+        caseRecord.Property(x => x.ReviewStatus).HasMaxLength(40).IsRequired();
+        caseRecord.Property(x => x.RecommendationType).HasMaxLength(60).IsRequired();
+        caseRecord.HasIndex(x => x.WorkflowSessionId)
+            .IsUnique()
+            .HasDatabaseName("idx_rag_case_records_workflow_session");
+        caseRecord.HasOne(x => x.WorkflowSession)
+            .WithMany(x => x.RagCaseRecords)
+            .HasForeignKey(x => x.WorkflowSessionId)
+            .OnDelete(DeleteBehavior.Cascade);
+    }
+
+    private static void ConfigureRagCaseEvidenceLinks(ModelBuilder modelBuilder)
+    {
+        var link = modelBuilder.Entity<RagCaseEvidenceLinkEntity>();
+        link.ToTable("rag_case_evidence_links");
+        link.HasKey(x => x.Id);
+        link.Property(x => x.EvidenceReference).HasMaxLength(200).IsRequired();
+        link.Property(x => x.RecommendationKey).HasMaxLength(200).IsRequired();
+        link.HasIndex(x => x.CaseRecordId)
+            .HasDatabaseName("idx_rag_case_evidence_links_case_record");
+        link.HasOne(x => x.CaseRecord)
+            .WithMany(x => x.EvidenceLinks)
+            .HasForeignKey(x => x.CaseRecordId)
+            .OnDelete(DeleteBehavior.Cascade);
+    }
+
+    private static void ConfigureRagRetrievalSnapshots(ModelBuilder modelBuilder)
+    {
+        var snapshot = modelBuilder.Entity<RagRetrievalSnapshotEntity>();
+        snapshot.ToTable("rag_retrieval_snapshots");
+        snapshot.HasKey(x => x.Id);
+        snapshot.HasIndex(x => x.WorkflowSessionId)
+            .HasDatabaseName("idx_rag_retrieval_snapshots_session");
+        snapshot.HasIndex(x => x.NodeExecutionId)
+            .HasDatabaseName("idx_rag_retrieval_snapshots_node");
+        snapshot.HasOne(x => x.WorkflowSession)
+            .WithMany(x => x.RagRetrievalSnapshots)
+            .HasForeignKey(x => x.WorkflowSessionId)
+            .OnDelete(DeleteBehavior.Cascade);
+        snapshot.HasOne(x => x.NodeExecution)
+            .WithMany(x => x.RagRetrievalSnapshots)
+            .HasForeignKey(x => x.NodeExecutionId)
+            .OnDelete(DeleteBehavior.Cascade);
     }
 }

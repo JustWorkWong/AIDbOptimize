@@ -4,6 +4,8 @@
 
 ## 当前目录约定
 
+- `docs/rag/`
+  RAG 语料长期边界文档，包括 facts / cases / prepared 的职责、命名和版本控制约束。
 - `docs/mcp/`
   MCP 相关长期说明文档，包括配置、发现、执行和前端交互约定。
 - `docs/workflow/`
@@ -15,15 +17,24 @@
 
 ## 主题文档
 
+- [RAG 语料目录说明](./rag/README.md)
 - [MCP 获取 tools 的配置与实现说明](./mcp/README.md)
 - [Workflow 后端代码流程说明](./workflow/README.md)
 - [PostgreSQL MCP 方案对比与建议](./mcp/postgresql-mcp-options.md)
 
-## 当前状态（2026-05-07）
+## 当前状态（2026-05-09）
 
-- `workflow skills v1` 已从方案进入真实主链，`RAG` 仍只保留扩展位
-- 当前代码验证通过：`dotnet test .\AIDbOptimize.slnx --no-restore` 与 `npm run build`
-- 当前没有新的未完成 active plan，默认参考最近完成的 `workflow skills v1` 基线
+- `workflow skills v1` 已从方案进入真实主链
+- `docs/rag/` 长期目录骨架与版本控制边界已建立
+- `Rag/Corpus` 命名契约与固定 seed catalog 已落代码并有单测覆盖
+- workflow 已新增 `WorkflowRagContextAssembler` 显式注入节点，并具备 facts/cases 检索基线、embedding 适配层、pgvector 存储接线，以及 `validate/rebuild/case audit` 运维入口
+- 当前已有新的 `RAG` active plan，后续实施以该计划为准
+
+## 当前执行计划
+
+- [RAG 平台接入方案](./plans/active/2026-05-aidboptimize-rag-platform/design.md)
+- [RAG 平台接入详细方案](./plans/active/2026-05-aidboptimize-rag-platform/detailed-design.md)
+- [RAG 平台接入任务清单](./plans/active/2026-05-aidboptimize-rag-platform/tasks.md)
 
 ## 当前默认基线
 

@@ -12,6 +12,7 @@ namespace AIDbOptimize.DataInit.HostedServices;
 /// </summary>
 public sealed class DataInitializationHostedService(
     IEnumerable<IDataInitializer> initializers,
+    RagSeedCorpusInitializer ragSeedCorpusInitializer,
     InitializationStateService initializationStateService,
     IHostApplicationLifetime hostApplicationLifetime,
     ILogger<DataInitializationHostedService> logger) : IHostedService
@@ -31,6 +32,7 @@ public sealed class DataInitializationHostedService(
                 await ExecuteInitializerAsync(initializer, cancellationToken);
             }
 
+            await ragSeedCorpusInitializer.RunAsync(cancellationToken);
             logger.LogInformation("业务测试库初始化流程执行完成。");
         }
         finally

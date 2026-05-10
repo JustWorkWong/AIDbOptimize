@@ -1,0 +1,13 @@
+从 E:\Db\src\AIDbOptimize.AppHost\Properties\launchSettings.json 使用启动设置...
+info: Aspire.Hosting.DistributedApplication[0]
+      Aspire version: 13.2.2+25961cf7043e413abaf8ad84348988f2904b90d5
+info: Aspire.Hosting.DistributedApplication[0]
+      Distributed application starting.
+info: Aspire.Hosting.DistributedApplication[0]
+      Application host directory is: E:\Db\src\AIDbOptimize.AppHost
+info: Aspire.Hosting.DistributedApplication[0]
+      Now listening on: http://localhost:17200
+info: Aspire.Hosting.DistributedApplication[0]
+      Login to the dashboard at http://localhost:17200/login?t=8d40aef1a56ba248524f9965f819f537
+info: Aspire.Hosting.DistributedApplication[0]
+      Distributed application started. Press Ctrl+C to shut down.

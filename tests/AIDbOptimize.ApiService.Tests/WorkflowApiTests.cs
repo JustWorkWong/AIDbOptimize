@@ -40,6 +40,153 @@ public sealed class WorkflowApiTests : IClassFixture<WorkflowApiTests.WorkflowAp
     }
 
     [Fact]
+    public async Task GetRagAssetStatus_ReturnsCounts()
+    {
+        var connectionId = await _factory.SeedConnectionAsync("rag-status-main", DatabaseEngine.PostgreSql);
+        await _factory.SeedRagFactAsync(
+            engine: "postgresql",
+            vendor: "postgresql",
+            topic: "memory",
+            sourcePath: "facts/postgresql/postgresql__postgresql__memory__runtime-config-resource.md",
+            title: "shared_buffers",
+            sectionPath: "Memory > shared_buffers",
+            text: "shared_buffers controls PostgreSQL shared memory.",
+            parameterNamesJson: """["shared_buffers"]""",
+            keywordsJson: """["postgresql","memory","shared_buffers"]""");
+        await _factory.SeedRagCaseAsync(
+            engine: "postgresql",
+            problemType: "memory",
+            summary: "shared_buffers was previously tuned successfully.",
+            evidenceReferences: ["shared_buffers"]);
+
+        using var client = _factory.CreateClient();
+        var startResponse = await client.PostAsJsonAsync("/api/workflows/db-config-optimization", new
+        {
+            connectionId = connectionId.ToString(),
+            options = new
+            {
+                allowFallbackSnapshot = true,
+                requireHumanReview = false,
+                enableEvidenceGrounding = true
+            },
+            requestedBy = "frontend",
+            notes = "rag-asset-status"
+        });
+        startResponse.EnsureSuccessStatusCode();
+        using var startJson = JsonDocument.Parse(await startResponse.Content.ReadAsStringAsync());
+        var workflowId = startJson.RootElement.GetProperty("sessionId").GetString();
+        await WaitForWorkflowStatusAsync(client, workflowId!, expectedStatuses: ["Completed"], timeoutSeconds: 60);
+
+        var response = await client.GetAsync("/api/rag/assets/status");
+
+        response.EnsureSuccessStatusCode();
+        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.True(json.RootElement.GetProperty("factDocumentCount").GetInt32() >= 1);
+        Assert.True(json.RootElement.GetProperty("caseRecordCount").GetInt32() >= 1);
+        Assert.True(json.RootElement.GetProperty("chunkCount").GetInt32() >= 1);
+        Assert.True(json.RootElement.GetProperty("retrievalSnapshotCount").GetInt32() >= 1);
+    }
+
+    [Fact]
+    public async Task GetRagCaseAudit_ReturnsProjectedCases()
+    {
+        await _factory.SeedRagCaseAsync(
+            engine: "mysql",
+            problemType: "memory",
+            summary: "innodb_buffer_pool_size was previously tuned successfully.",
+            evidenceReferences: ["innodb_buffer_pool_size"]);
+        using var client = _factory.CreateClient();
+
+        var response = await client.GetAsync("/api/rag/cases/audit");
+
+        response.EnsureSuccessStatusCode();
+        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.True(json.RootElement.GetArrayLength() >= 1);
+        Assert.True(json.RootElement[0].TryGetProperty("problemType", out _));
+        Assert.True(json.RootElement[0].TryGetProperty("evidenceLinkCount", out _));
+    }
+
+    [Fact]
+    public async Task ValidateRagCorpus_ReturnsCoverageAndIssues()
+    {
+        var corpusRootPath = CreateTempRagCorpus(
+            "facts/mysql/mysql__mysql__memory__server-system-variables.md",
+            """
+            ---
+            source_title: Sample
+            source_url: https://example.com/mysql
+            ---
+            # Buffer Pool
+
+            Use a larger buffer pool.
+            """);
+
+        try
+        {
+            using var client = _factory.CreateClient();
+            var response = await client.PostAsJsonAsync("/api/rag/validate", new
+            {
+                corpusRootPath
+            });
+
+            response.EnsureSuccessStatusCode();
+            using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            Assert.Equal(1, json.RootElement.GetProperty("validDocumentCount").GetInt32());
+            Assert.Equal(0, json.RootElement.GetProperty("invalidDocumentCount").GetInt32());
+            Assert.True(json.RootElement.GetProperty("coverage").GetArrayLength() >= 1);
+        }
+        finally
+        {
+            DeleteTempDirectory(corpusRootPath);
+        }
+    }
+
+    [Fact]
+    public async Task RebuildRagCorpus_ReingestsDocumentsAndProjectsCases()
+    {
+        var corpusRootPath = CreateTempRagCorpus(
+            "facts/mysql/mysql__mysql__memory__server-system-variables.md",
+            """
+            ---
+            source_title: Sample
+            source_url: https://example.com/mysql
+            ---
+            # innodb_buffer_pool_size
+
+            innodb_buffer_pool_size should align with available memory.
+            """);
+
+        try
+        {
+            await _factory.SeedSucceededWorkflowAsync(
+                bundleId: "mysql-default",
+                summary: "innodb_buffer_pool_size was previously tuned successfully.",
+                findingType: "memory",
+                recommendationType: "actionableRecommendation",
+                evidenceReferences: ["innodb_buffer_pool_size"]);
+            using var client = _factory.CreateClient();
+            var response = await client.PostAsJsonAsync("/api/rag/rebuild", new
+            {
+                corpusRootPath
+            });
+
+            response.EnsureSuccessStatusCode();
+            using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            Assert.True(json.RootElement.GetProperty("documentCount").GetInt32() >= 1);
+            Assert.True(json.RootElement.GetProperty("chunkCount").GetInt32() >= 1);
+            Assert.True(json.RootElement.GetProperty("preparedFileCount").GetInt32() >= 2);
+            Assert.True(json.RootElement.GetProperty("projectedCaseCount").GetInt32() >= 1);
+            Assert.True(Directory.GetFiles(Path.Combine(corpusRootPath, "prepared", "facts", "mysql"), "*__metadata.json", SearchOption.TopDirectoryOnly).Length >= 1);
+            Assert.True(Directory.GetFiles(Path.Combine(corpusRootPath, "cases", "mysql"), "*.md", SearchOption.TopDirectoryOnly).Length >= 1);
+            Assert.True(Directory.GetFiles(Path.Combine(corpusRootPath, "prepared", "cases", "mysql"), "*__metadata.json", SearchOption.TopDirectoryOnly).Length >= 1);
+        }
+        finally
+        {
+            DeleteTempDirectory(corpusRootPath);
+        }
+    }
+
+    [Fact]
     public async Task GetHistory_ReturnsSuccessStatusCode()
     {
         using var client = _factory.CreateClient();
@@ -128,6 +275,158 @@ public sealed class WorkflowApiTests : IClassFixture<WorkflowApiTests.WorkflowAp
         Assert.Equal("1.0.0", metadata["investigation_skill_version"]);
         Assert.Equal("1.0.0", metadata["diagnosis_skill_version"]);
         Assert.Equal("degraded", metadata["gate_status"]);
+    }
+
+    [Fact]
+    public async Task StartWorkflow_EmitsRagAssemblerNodeAndMetadata()
+    {
+        var connectionId = await _factory.SeedConnectionAsync("postgres-rag", DatabaseEngine.PostgreSql);
+        await _factory.SeedRagFactAsync(
+            engine: "postgresql",
+            vendor: "postgresql",
+            topic: "memory",
+            sourcePath: "facts/postgresql/postgresql__postgresql__memory__runtime-config-resource.md",
+            title: "shared_buffers",
+            sectionPath: "Memory > shared_buffers",
+            text: "shared_buffers controls PostgreSQL shared memory and should align with available host memory.",
+            parameterNamesJson: """["shared_buffers"]""",
+            keywordsJson: """["postgresql","memory","shared_buffers"]""");
+        using var client = _factory.CreateClient();
+
+        var startResponse = await client.PostAsJsonAsync("/api/workflows/db-config-optimization", new
+        {
+            connectionId = connectionId.ToString(),
+            options = new
+            {
+                allowFallbackSnapshot = true,
+                requireHumanReview = false,
+                enableEvidenceGrounding = true
+            },
+            requestedBy = "frontend",
+            notes = "rag-node"
+        });
+
+        startResponse.EnsureSuccessStatusCode();
+        using var startJson = JsonDocument.Parse(await startResponse.Content.ReadAsStringAsync());
+        var workflowId = startJson.RootElement.GetProperty("sessionId").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(workflowId));
+
+        await WaitForWorkflowStatusAsync(client, workflowId!, expectedStatuses: ["Completed"], timeoutSeconds: 60);
+
+        var detailResponse = await client.GetAsync($"/api/workflows/{workflowId}");
+        detailResponse.EnsureSuccessStatusCode();
+        using var detailJson = JsonDocument.Parse(await detailResponse.Content.ReadAsStringAsync());
+        var metadata = detailJson.RootElement
+            .GetProperty("result")
+            .GetProperty("parsedReport")
+            .GetProperty("collectionMetadata")
+            .EnumerateArray()
+            .ToDictionary(
+                item => item.GetProperty("name").GetString() ?? string.Empty,
+                item => item.GetProperty("value").GetString() ?? string.Empty,
+                StringComparer.OrdinalIgnoreCase);
+        Assert.Equal("facts-hit", metadata["rag_status"]);
+        Assert.Equal("1", metadata["external_knowledge_count"]);
+        Assert.Equal("degraded", metadata["gate_status"]);
+        Assert.Equal(
+            1,
+            detailJson.RootElement
+                .GetProperty("result")
+                .GetProperty("parsedReport")
+                .GetProperty("externalKnowledgeItems")
+                .GetArrayLength());
+        Assert.True(
+            detailJson.RootElement
+                .GetProperty("result")
+                .GetProperty("parsedReport")
+                .GetProperty("recommendations")[0]
+                .GetProperty("externalKnowledgeCitations")
+                .GetArrayLength() >= 1);
+
+        var historyResponse = await client.GetAsync($"/api/history/{workflowId}");
+        historyResponse.EnsureSuccessStatusCode();
+        using var historyJson = JsonDocument.Parse(await historyResponse.Content.ReadAsStringAsync());
+        Assert.Contains(
+            historyJson.RootElement.GetProperty("nodeExecutions").EnumerateArray(),
+            item => string.Equals(item.GetProperty("nodeName").GetString(), "WorkflowRagContextAssembler", StringComparison.Ordinal));
+
+        await using var dbContext = _factory.CreateControlPlaneDbContext();
+        var workflowSessionId = Guid.Parse(workflowId!);
+        var snapshot = dbContext.RagRetrievalSnapshots.Single(item => item.WorkflowSessionId == workflowSessionId);
+        Assert.NotEqual(Guid.Empty, snapshot.NodeExecutionId);
+        Assert.Contains("facts-hit", snapshot.SnapshotTypeJson, StringComparison.Ordinal);
+        var session = dbContext.WorkflowSessions.Single(item => item.Id == workflowSessionId);
+        Assert.Contains(snapshot.Id.ToString(), session.StateJson, StringComparison.OrdinalIgnoreCase);
+        var latestCheckpoint = dbContext.WorkflowCheckpoints
+            .Where(item => item.WorkflowSessionId == workflowSessionId)
+            .OrderByDescending(item => item.Sequence)
+            .First();
+        Assert.Contains(snapshot.Id.ToString(), latestCheckpoint.SnapshotJson, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("shared_buffers", detailJson.RootElement.GetProperty("result").GetProperty("payloadJson").GetString(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task StartWorkflow_InjectsCaseKnowledgeIntoResult()
+    {
+        var connectionId = await _factory.SeedConnectionAsync("mysql-rag-case", DatabaseEngine.MySql);
+        await _factory.SeedRagCaseAsync(
+            engine: "mysql",
+            problemType: "memory",
+            summary: "innodb_buffer_pool_size was previously tuned successfully.",
+            evidenceReferences: ["innodb_buffer_pool_size"]);
+        using var client = _factory.CreateClient();
+
+        var startResponse = await client.PostAsJsonAsync("/api/workflows/db-config-optimization", new
+        {
+            connectionId = connectionId.ToString(),
+            options = new
+            {
+                allowFallbackSnapshot = true,
+                requireHumanReview = false,
+                enableEvidenceGrounding = true
+            },
+            requestedBy = "frontend",
+            notes = "rag-case-node"
+        });
+
+        startResponse.EnsureSuccessStatusCode();
+        using var startJson = JsonDocument.Parse(await startResponse.Content.ReadAsStringAsync());
+        var workflowId = startJson.RootElement.GetProperty("sessionId").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(workflowId));
+
+        await WaitForWorkflowStatusAsync(client, workflowId!, expectedStatuses: ["Completed"], timeoutSeconds: 60);
+
+        var detailResponse = await client.GetAsync($"/api/workflows/{workflowId}");
+        detailResponse.EnsureSuccessStatusCode();
+        using var detailJson = JsonDocument.Parse(await detailResponse.Content.ReadAsStringAsync());
+        var metadata = detailJson.RootElement
+            .GetProperty("result")
+            .GetProperty("parsedReport")
+            .GetProperty("collectionMetadata")
+            .EnumerateArray()
+            .ToDictionary(
+                item => item.GetProperty("name").GetString() ?? string.Empty,
+                item => item.GetProperty("value").GetString() ?? string.Empty,
+                StringComparer.OrdinalIgnoreCase);
+        Assert.Equal("case-hit", metadata["rag_status"]);
+        Assert.Equal("1", metadata["external_knowledge_count"]);
+        Assert.Equal(
+            "case",
+            detailJson.RootElement
+                .GetProperty("result")
+                .GetProperty("parsedReport")
+                .GetProperty("externalKnowledgeItems")[0]
+                .GetProperty("sourceType")
+                .GetString());
+        Assert.Contains(
+            "/api/history/",
+            detailJson.RootElement
+                .GetProperty("result")
+                .GetProperty("parsedReport")
+                .GetProperty("externalKnowledgeItems")[0]
+                .GetProperty("normalizedValue")
+                .GetString(),
+            StringComparison.Ordinal);
     }
 
     [Fact]
@@ -224,6 +523,16 @@ public sealed class WorkflowApiTests : IClassFixture<WorkflowApiTests.WorkflowAp
     public async Task SubmitReview_UpdatesWorkflowStatus()
     {
         var connectionId = await _factory.SeedConnectionAsync("mysql-main", DatabaseEngine.MySql);
+        await _factory.SeedRagFactAsync(
+            engine: "mysql",
+            vendor: "mysql",
+            topic: "memory",
+            sourcePath: "facts/mysql/mysql__mysql__memory__server-system-variables.md",
+            title: "innodb_buffer_pool_size",
+            sectionPath: "Memory > innodb_buffer_pool_size",
+            text: "innodb_buffer_pool_size should align with available host memory and workload shape.",
+            parameterNamesJson: """["innodb_buffer_pool_size"]""",
+            keywordsJson: """["mysql","memory","innodb_buffer_pool_size"]""");
         using var client = _factory.CreateClient();
 
         var startResponse = await client.PostAsJsonAsync("/api/workflows/db-config-optimization", new
@@ -258,6 +567,10 @@ public sealed class WorkflowApiTests : IClassFixture<WorkflowApiTests.WorkflowAp
         submitResponse.EnsureSuccessStatusCode();
 
         await WaitForWorkflowStatusAsync(client, workflowId!, expectedStatuses: ["Completed"], timeoutSeconds: 60);
+
+        await using var dbContext = _factory.CreateControlPlaneDbContext();
+        var workflowSessionId = Guid.Parse(workflowId!);
+        Assert.Equal(1, dbContext.RagRetrievalSnapshots.Count(item => item.WorkflowSessionId == workflowSessionId));
     }
 
     [Fact]
@@ -505,12 +818,24 @@ public sealed class WorkflowApiTests : IClassFixture<WorkflowApiTests.WorkflowAp
         using var historyDetailJson = JsonDocument.Parse(await historyDetailResponse.Content.ReadAsStringAsync());
         Assert.True(historyDetailJson.RootElement.GetProperty("nodeExecutions").GetArrayLength() >= 1);
         Assert.True(historyDetailJson.RootElement.GetProperty("toolExecutions").GetArrayLength() >= 1);
+        Assert.True(historyDetailJson.RootElement.GetProperty("ragSnapshots").GetArrayLength() >= 1);
         Assert.Contains(
             historyDetailJson.RootElement.GetProperty("nodeExecutions").EnumerateArray(),
             item => string.Equals(
                 item.GetProperty("nodeName").GetString(),
                 "InvestigationPlanner",
                 StringComparison.Ordinal));
+        Assert.Contains(
+            historyDetailJson.RootElement.GetProperty("ragSnapshots").EnumerateArray(),
+            item =>
+            {
+                var snapshotTypeJson = item.GetProperty("snapshotTypeJson").GetString()!;
+                return snapshotTypeJson.Contains("facts-hit", StringComparison.Ordinal)
+                    || snapshotTypeJson.Contains("facts-and-cases-hit", StringComparison.Ordinal)
+                    || snapshotTypeJson.Contains("vector-and-cases-hit", StringComparison.Ordinal)
+                    || snapshotTypeJson.Contains("empty-corpus", StringComparison.Ordinal)
+                    || snapshotTypeJson.Contains("no-match", StringComparison.Ordinal);
+            });
         Assert.True(historyDetailJson.RootElement.GetProperty("result").GetProperty("parsedReport").ValueKind == JsonValueKind.Object);
         Assert.True(historyDetailJson.RootElement
             .GetProperty("result")
@@ -528,6 +853,16 @@ public sealed class WorkflowApiTests : IClassFixture<WorkflowApiTests.WorkflowAp
     public async Task Recovery_OnRunningSession_RehydratesPendingReview()
     {
         var connectionId = await _factory.SeedConnectionAsync("recovery-main", DatabaseEngine.MySql);
+        await _factory.SeedRagFactAsync(
+            engine: "mysql",
+            vendor: "mysql",
+            topic: "memory",
+            sourcePath: "facts/mysql/mysql__mysql__memory__server-system-variables.md",
+            title: "innodb_buffer_pool_size",
+            sectionPath: "Memory > innodb_buffer_pool_size",
+            text: "innodb_buffer_pool_size should align with available host memory and workload shape.",
+            parameterNamesJson: """["innodb_buffer_pool_size"]""",
+            keywordsJson: """["mysql","memory","innodb_buffer_pool_size"]""");
         using var client = _factory.CreateClient();
 
         var startResponse = await client.PostAsJsonAsync("/api/workflows/db-config-optimization", new
@@ -571,6 +906,7 @@ public sealed class WorkflowApiTests : IClassFixture<WorkflowApiTests.WorkflowAp
         var sessionAfter = await dbContextAfter.WorkflowSessions.SingleAsync(x => x.Id == sessionId);
         Assert.Equal(Domain.DbConfigOptimization.Enums.WorkflowSessionStatus.WaitingForReview, sessionAfter.Status);
         Assert.NotNull(sessionAfter.ActiveReviewTaskId);
+        Assert.Equal(1, dbContextAfter.RagRetrievalSnapshots.Count(x => x.WorkflowSessionId == sessionId));
     }
 
     [Fact]
@@ -785,6 +1121,128 @@ public sealed class WorkflowApiTests : IClassFixture<WorkflowApiTests.WorkflowAp
             return _dbContextFactory.CreateDbContext();
         }
 
+        public async Task SeedRagFactAsync(
+            string engine,
+            string vendor,
+            string topic,
+            string sourcePath,
+            string title,
+            string sectionPath,
+            string text,
+            string parameterNamesJson,
+            string keywordsJson)
+        {
+            await using var dbContext = _dbContextFactory.CreateDbContext();
+            var document = new RagDocumentEntity
+            {
+                Id = Guid.NewGuid(),
+                DocumentType = AIDbOptimize.Infrastructure.Rag.Corpus.RagDocumentType.Fact,
+                Engine = engine,
+                Vendor = vendor,
+                Topic = topic,
+                SourcePath = sourcePath,
+                SourceUrl = $"https://example.com/{title}",
+                SourceTitle = title,
+                ContentHash = Guid.NewGuid().ToString("N"),
+                CapturedAt = DateTimeOffset.UtcNow,
+                IsActive = true,
+                CreatedAt = DateTimeOffset.UtcNow,
+                UpdatedAt = DateTimeOffset.UtcNow
+            };
+            dbContext.RagDocuments.Add(document);
+            dbContext.RagDocumentChunks.Add(new RagDocumentChunkEntity
+            {
+                Id = Guid.NewGuid(),
+                Document = document,
+                ChunkKey = $"{title}-chunk-1",
+                Title = title,
+                SectionPath = sectionPath,
+                Text = text,
+                ProductVersion = "current",
+                AppliesTo = $"{vendor}:{engine}",
+                ParameterNamesJson = parameterNamesJson,
+                KeywordsJson = keywordsJson,
+                CreatedAt = DateTimeOffset.UtcNow
+            });
+            await dbContext.SaveChangesAsync();
+        }
+
+        public async Task SeedRagCaseAsync(
+            string engine,
+            string problemType,
+            string summary,
+            IReadOnlyList<string> evidenceReferences)
+        {
+            await using var dbContext = _dbContextFactory.CreateDbContext();
+            var caseRecord = new RagCaseRecordEntity
+            {
+                Id = Guid.NewGuid(),
+                WorkflowSessionId = Guid.NewGuid(),
+                Engine = engine,
+                ProblemType = problemType,
+                Outcome = "Completed",
+                ReviewStatus = "Approved",
+                RecommendationType = "actionableRecommendation",
+                Summary = summary,
+                CreatedAt = DateTimeOffset.UtcNow
+            };
+            dbContext.RagCaseRecords.Add(caseRecord);
+            foreach (var evidenceReference in evidenceReferences)
+            {
+                dbContext.RagCaseEvidenceLinks.Add(new RagCaseEvidenceLinkEntity
+                {
+                    Id = Guid.NewGuid(),
+                    CaseRecord = caseRecord,
+                    EvidenceReference = evidenceReference,
+                    RecommendationKey = problemType,
+                    CreatedAt = DateTimeOffset.UtcNow
+                });
+            }
+
+            await dbContext.SaveChangesAsync();
+        }
+
+        public async Task SeedSucceededWorkflowAsync(
+            string bundleId,
+            string summary,
+            string findingType,
+            string recommendationType,
+            IReadOnlyList<string> evidenceReferences)
+        {
+            await using var dbContext = _dbContextFactory.CreateDbContext();
+            dbContext.WorkflowSessions.Add(new WorkflowSessionEntity
+            {
+                Id = Guid.NewGuid(),
+                ConnectionId = Guid.NewGuid(),
+                WorkflowName = "DbConfigOptimization",
+                EngineType = "maf",
+                Status = WorkflowSessionStatus.Succeeded,
+                RequestedBy = "tester",
+                InputPayloadJson = JsonSerializer.Serialize(new { bundleId }),
+                StateJson = "{}",
+                ResultType = "db-config-optimization-report",
+                ResultPayloadJson = JsonSerializer.Serialize(new
+                {
+                    title = "db-config report",
+                    summary,
+                    recommendations = new[]
+                    {
+                        new
+                        {
+                            key = evidenceReferences[0],
+                            findingType,
+                            recommendationType,
+                            evidenceReferences
+                        }
+                    }
+                }),
+                CreatedAt = DateTimeOffset.UtcNow,
+                UpdatedAt = DateTimeOffset.UtcNow,
+                CompletedAt = DateTimeOffset.UtcNow
+            });
+            await dbContext.SaveChangesAsync();
+        }
+
         public void SetToolExecutionDelay(TimeSpan delay)
         {
             _behavior.ToolExecutionDelay = delay;
@@ -798,6 +1256,23 @@ public sealed class WorkflowApiTests : IClassFixture<WorkflowApiTests.WorkflowAp
         public void FailDiagnosis(string errorMessage)
         {
             _behavior.DiagnosisExceptionMessage = errorMessage;
+        }
+    }
+
+    private static string CreateTempRagCorpus(string relativePath, string content)
+    {
+        var rootPath = Path.Combine(Path.GetTempPath(), $"rag-corpus-{Guid.NewGuid():N}");
+        var fullPath = Path.Combine(rootPath, relativePath.Replace('/', Path.DirectorySeparatorChar));
+        Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
+        File.WriteAllText(fullPath, content);
+        return rootPath;
+    }
+
+    private static void DeleteTempDirectory(string rootPath)
+    {
+        if (Directory.Exists(rootPath))
+        {
+            Directory.Delete(rootPath, recursive: true);
         }
     }
 
@@ -849,7 +1324,14 @@ public sealed class WorkflowApiTests : IClassFixture<WorkflowApiTests.WorkflowAp
                         : "requestMoreContext",
                     appliesWhen = item.AppliesWhen,
                     ruleId = item.RuleId,
-                    ruleVersion = item.RuleVersion
+                    ruleVersion = item.RuleVersion,
+                    externalKnowledgeCitations = evidence.ExternalKnowledgeItems
+                        .Where(knowledge =>
+                            knowledge.Reference.Contains(item.Key, StringComparison.OrdinalIgnoreCase) ||
+                            (knowledge.RawValue?.Contains(item.Key, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                            (knowledge.NormalizedValue?.Contains(item.Key, StringComparison.OrdinalIgnoreCase) ?? false))
+                        .Select(knowledge => knowledge.NormalizedValue ?? knowledge.Reference)
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
                 }),
                 evidenceItems = evidence.EvidenceItems.Select(item => new
                 {
@@ -879,6 +1361,21 @@ public sealed class WorkflowApiTests : IClassFixture<WorkflowApiTests.WorkflowAp
                     name = item.Name,
                     value = item.Value,
                     description = item.Description
+                }),
+                externalKnowledgeItems = evidence.ExternalKnowledgeItems.Select(item => new
+                {
+                    sourceType = item.SourceType,
+                    reference = item.Reference,
+                    description = item.Description,
+                    category = item.Category,
+                    rawValue = item.RawValue,
+                    normalizedValue = item.NormalizedValue,
+                    unit = item.Unit,
+                    sourceScope = item.SourceScope,
+                    capturedAt = item.CapturedAt,
+                    expiresAt = item.ExpiresAt,
+                    isCached = item.IsCached,
+                    collectionMethod = item.CollectionMethod
                 }),
                 warnings = evidence.Warnings
             });

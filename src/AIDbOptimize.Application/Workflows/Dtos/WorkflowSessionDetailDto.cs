@@ -53,6 +53,7 @@ public sealed record WorkflowStructuredResultDto(
     string Summary,
     IReadOnlyList<WorkflowRecommendationDto> Recommendations,
     IReadOnlyList<WorkflowEvidenceItemDto> EvidenceItems,
+    IReadOnlyList<WorkflowEvidenceItemDto> ExternalKnowledgeItems,
     IReadOnlyList<WorkflowMissingContextItemDto> MissingContextItems,
     IReadOnlyList<WorkflowCollectionMetadataDto> CollectionMetadata,
     IReadOnlyList<string> Warnings);
@@ -70,7 +71,8 @@ public sealed record WorkflowRecommendationDto(
     string RecommendationType,
     string? AppliesWhen,
     string? RuleId,
-    string? RuleVersion);
+    string? RuleVersion,
+    IReadOnlyList<string> ExternalKnowledgeCitations);
 
 public sealed record WorkflowEvidenceItemDto(
     string SourceType,

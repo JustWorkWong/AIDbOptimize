@@ -14,11 +14,13 @@
 - [workflow skills v1 详细方案](../plans/active/2026-05-aidboptimize-workflow-skills-v1/detailed-design.md)
 - [workflow skills v1 任务清单](../plans/active/2026-05-aidboptimize-workflow-skills-v1/tasks.md)
 
-## 当前验证快照（2026-05-07）
+## 当前验证快照（2026-05-09）
 
 - `workflow skills v1` 已经进入真实 start / resume / recovery 主链，不再只是设计稿
-- `RAG` 仍然只保留扩展位，没有接入真实 retrieval、知识注入或外部裁决
-- `dotnet test .\AIDbOptimize.slnx --no-restore` 通过，当前共 `84` 个测试
+- `RAG` 已落地 corpus 骨架、seed catalog 和 `WorkflowRagContextAssembler` 注入节点
+- 当前已具备基于控制面 facts/cases 骨架的检索基线，并完成 pgvector / embedding backend 的基础接线
+- 已落地 `/api/rag/assets/status`、`/api/rag/cases/audit`、`/api/rag/validate`、`/api/rag/rebuild` 作为当前最小运维入口
+- `dotnet test .\AIDbOptimize.slnx --no-restore` 通过，当前共 `125` 个测试
 - `npm run build` (`src/AIDbOptimize.Web`) 通过
 
 ## 1. skills 与 RAG 边界
@@ -35,23 +37,23 @@
 1. `skills`
    已经接入 runtime 主链，不再只是文档规划。
 2. `RAG`
-   仍然只有协议预留位，没有接入真实 retrieval、知识注入或外部知识裁决。
+   已经接入主链插槽、语料命名骨架、facts/cases 检索基线，并完成 pgvector / embedding backend 的基础接线；当前还没有真正的 vector similarity 主路径验证和完整 citation 输出闭环。
 
 因此，后续所有文档都必须遵守同一条边界：
 
 - skill 可以决定“查什么、怎么降级、怎么输出”
 - RAG 未来只能提供 diagnosis 附加上下文，不能补齐 required evidence，也不能改变 gate 判定
 
-未来如果接入 `FactRagExecutor / CaseRagExecutor`，插入位置也已经固定：
+当前显式插入位已经固定为：
 
 ```text
 SkillPolicyGate
-  -> FactRagExecutor / CaseRagExecutor (future, optional)
+  -> WorkflowRagContextAssembler
   -> DiagnosisAgent
   -> Grounding
 ```
 
-也就是说，RAG 只能增强 diagnosis 的上下文，不能回流修改 planner、collection 或 gate 结果。
+未来如果接入 `FactRagExecutor / CaseRagExecutor`，也必须挂在 `WorkflowRagContextAssembler` 背后，而不是回流到 planner、collection 或 gate。
 
 ## 2. 后端分层
 
@@ -119,6 +121,7 @@ DbConfigInputValidationExecutor
   -> InvestigationPlanner
   -> EvidenceCollectionSubworkflow
   -> SkillPolicyGate
+  -> WorkflowRagContextAssembler
   -> DbConfigDiagnosisAgentExecutor
   -> DbConfigGroundingExecutor
   -> DbConfigHumanReviewGateExecutor or DbConfigCompletionDirectExecutor
@@ -136,7 +139,8 @@ DbConfigHumanReviewGateExecutor
 1. planner 先把 skill ref 映射成 capability 计划。
 2. collection subworkflow 按计划做采集，而不是无条件全量采集。
 3. policy gate 在 diagnosis 前做 `pass / degraded / blocked` 判定。
-4. blocked 路径直接完成，避免缺证据时继续生成看似确定的建议。
+4. `WorkflowRagContextAssembler` 只在 gate 通过或降级后运行，负责补充 diagnosis 前的外部知识上下文插槽。
+5. blocked 路径直接完成，避免缺证据时继续生成看似确定的建议。
 
 ## 5. graph 与 runtime 的分工
 
@@ -247,6 +251,22 @@ gate 会继续把这些字段写回 `collectionMetadata`：
 - `gate_status`
 
 blocked 路径会生成结构化 report JSON，而不是只返回一个异常字符串。
+
+### 6.5 WorkflowRagContextAssembler
+
+`WorkflowRagContextAssembler` 是当前 RAG 的真实落点，但它仍然保持“最小诚实实现”：
+
+- 它位于 `SkillPolicyGate` 之后、`DbConfigDiagnosisAgentExecutor` 之前。
+- 它不会回流修改 `gate_status`，也不会把外部知识伪装成 observed evidence。
+- 当前实现会优先查询控制面 `rag_document_chunks` 里的 facts 文档骨架，并根据 `engine + evidence refs + metadata/keywords` 做 metadata-first 检索。
+- 当前也会查询 `RagCaseRecordEntity / RagCaseEvidenceLinkEntity`，把命中的历史 workflow 投影作为 `sourceType=case` 的补充上下文注入。
+- diagnosis 侧继续通过 `ChatClientAgent` / `Microsoft.Extensions.AI` 路径接入，并通过 `ChatClientAgentOptions.AIContextProviders` 挂载 `RagRetrievedKnowledgeContextProvider` 来注入已检索的外部知识；embedding 侧现在通过 `IEmbeddingGenerator<string, Embedding<float>>` 适配层接入，供应商直连被限制在 `Rag/Embeddings/`。
+- embedding 适配层和 `rag_document_chunks.embedding` 向量列已经接入，`pgvector` 扩展与 provider 也已完成基础接线；后续只差把真正的向量相似度路径跑成默认主路径并补集成验证。
+- 当语料为空或未命中时，只会写审计 metadata，不会伪造知识结果；当前常见状态包括：
+  - `rag_status=empty-corpus`
+  - `rag_status=no-match`
+  - `rag_status=facts-hit`
+- case retrieval、pgvector、embedding 和更强的 rerank 仍要按 active plan 继续落地。
 
 ## 7. diagnosis、grounding 与 recommendationType
 
@@ -428,6 +448,7 @@ history detail 来自：
 - `workflow_sessions`
 - `workflow_node_executions`
 - `mcp_tool_executions`
+- `rag_retrieval_snapshots`
 - `workflow_review_tasks`
 
 因此它能同时展示：
@@ -435,6 +456,7 @@ history detail 来自：
 - 当前状态和最终结果
 - 每个节点的执行输入 / 输出
 - MCP 工具调用审计
+- retrieval snapshot 摘要（当前通过 `ragSnapshots` 字段暴露）
 - review 决策记录
 
 换句话说，前端看到的“状态、回放、历史详情”都来自持久化投影，而不是临时内存对象。

@@ -8,21 +8,31 @@ using AIDbOptimize.Application.Abstractions.Mcp;
 using AIDbOptimize.Application.Abstractions.Persistence;
 using AIDbOptimize.Application.DataInitialization.Services;
 using AIDbOptimize.Application.Mcp.Services;
+using AIDbOptimize.Application.Rag.Services;
 using AIDbOptimize.Application.Workflows.Services;
 using AIDbOptimize.Infrastructure.Agents;
 using AIDbOptimize.Infrastructure.Mcp;
 using AIDbOptimize.Infrastructure.Observability;
 using AIDbOptimize.Infrastructure.Persistence;
 using AIDbOptimize.Infrastructure.Persistence.Repositories;
+using AIDbOptimize.Infrastructure.Rag;
+using AIDbOptimize.Infrastructure.Rag.Embeddings;
+using AIDbOptimize.Infrastructure.Rag.Ingestion;
+using AIDbOptimize.Infrastructure.Rag.Preprocess;
+using AIDbOptimize.Infrastructure.Rag.VectorData;
+using AIDbOptimize.Infrastructure.Rag.Workflow;
 using AIDbOptimize.Infrastructure.Security;
 using AIDbOptimize.Infrastructure.Workflows.Pipeline;
 using AIDbOptimize.Infrastructure.Workflows.Runtime;
 using AIDbOptimize.Infrastructure.Workflows.Services;
 using AIDbOptimize.Infrastructure.Workflows.Skills;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.AI;
+using Microsoft.Extensions.VectorData;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
+using Pgvector.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Configuration.AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: true);
@@ -46,11 +56,17 @@ var serviceVersion = ResolveServiceVersion();
 var diagnosisAgentOptions = builder.Configuration
     .GetSection("AIDbOptimize:Agent:Diagnosis")
     .Get<DbConfigDiagnosisAgentOptions>() ?? new DbConfigDiagnosisAgentOptions();
+var ragEmbeddingOptions = builder.Configuration
+    .GetSection("AIDbOptimize:Agent:RagEmbedding")
+    .Get<RagEmbeddingOptions>() ?? new RagEmbeddingOptions();
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 builder.Services.AddDataProtection();
 builder.Services.AddSingleton(diagnosisAgentOptions);
+builder.Services.AddSingleton(ragEmbeddingOptions);
+builder.Services.AddSingleton<IEmbeddingGenerator<string, Embedding<float>>, RagEmbeddingGenerator>();
+builder.Services.AddSingleton<VectorStore, RagVectorStore>();
 builder.Services.AddOpenTelemetry()
     .ConfigureResource(resource =>
     {
@@ -88,7 +104,7 @@ builder.Services.AddOpenTelemetry()
     });
 
 builder.Services.AddDbContextFactory<ControlPlaneDbContext>(options =>
-    options.UseNpgsql(controlPlaneConnectionString));
+    options.UseNpgsql(controlPlaneConnectionString, npgsql => npgsql.UseVector()));
 
 builder.Services.AddHostedService<ControlPlaneMigrationHostedService>();
 builder.Services.AddHostedService<ControlPlaneDefaultSeedHostedService>();
@@ -98,6 +114,12 @@ builder.Services.AddSingleton<IConnectionSecretProtector, ConnectionSecretProtec
 builder.Services.AddScoped<IMcpConnectionRepository, McpConnectionRepository>();
 builder.Services.AddScoped<IMcpToolRepository, McpToolRepository>();
 builder.Services.AddScoped<IDataInitializationRunRepository, DataInitializationRunRepository>();
+builder.Services.AddScoped<IRagAssetStatusQuery, RagAssetStatusQuery>();
+builder.Services.AddScoped<IRagCaseAuditQuery, RagCaseAuditQuery>();
+builder.Services.AddScoped<IRagDocumentChunkRepository, RagDocumentChunkRepository>();
+builder.Services.AddScoped<IRagCaseRecordRepository, RagCaseRecordRepository>();
+builder.Services.AddScoped<IRagRetrievalSnapshotRepository, RagRetrievalSnapshotRepository>();
+builder.Services.AddScoped<IRagOperationsService, RagOperationsService>();
 builder.Services.AddScoped<IWorkflowSessionRepository, WorkflowSessionRepository>();
 builder.Services.AddScoped<IWorkflowCheckpointRepository, WorkflowCheckpointRepository>();
 builder.Services.AddScoped<IWorkflowReviewTaskRepository, WorkflowReviewTaskRepository>();
@@ -118,11 +140,22 @@ builder.Services.AddScoped<IDbConfigRule, PostgreSqlPlannerCostRule>();
 builder.Services.AddScoped<IDbConfigRule, PostgreSqlTempIoRule>();
 builder.Services.AddScoped<IDbConfigRule, PostgreSqlObservabilityGapRule>();
 builder.Services.AddScoped<DbConfigSnapshotCollectorExecutor>();
+builder.Services.AddScoped<CorpusPreprocessor>();
+builder.Services.AddScoped<CorpusChunker>();
+builder.Services.AddScoped<CorpusChunkMetadataExtractor>();
+builder.Services.AddScoped<RagPreparedArtifactWriter>();
+builder.Services.AddScoped<RagKnowledgeIngestionService>();
+builder.Services.AddScoped<HistoricalOptimizationCaseProjector>();
+builder.Services.AddSingleton(new RagQueryOptions());
 builder.Services.AddScoped<DbConfigRuleAnalysisExecutor>();
 builder.Services.AddSingleton<EvidenceCapabilityCatalog>();
 builder.Services.AddScoped<InvestigationPlanner>();
 builder.Services.AddScoped<EvidenceCollectionSubworkflow>();
 builder.Services.AddScoped<SkillPolicyGate>();
+builder.Services.AddScoped<WorkflowDocumentContextProvider>();
+builder.Services.AddScoped<WorkflowRagContextAssembler>();
+builder.Services.AddScoped<IRagEmbeddingService, RagEmbeddingService>();
+builder.Services.AddScoped<IRagKnowledgeQueryService, RagKnowledgeQueryService>();
 builder.Services.AddScoped<DiagnosisRuleEvaluator>();
 builder.Services.AddScoped<DbConfigDiagnosisReportBuilder>();
 builder.Services.AddScoped<IDbConfigDiagnosisAgentExecutor, DbConfigDiagnosisAgentExecutor>();
@@ -142,6 +175,9 @@ builder.Services.AddScoped<IMcpToolExecutionService, McpToolExecutionService>();
 builder.Services.AddScoped<McpDiscoveryAppService>();
 builder.Services.AddScoped<McpToolPermissionAppService>();
 builder.Services.AddScoped<InitializationStatusAppService>();
+builder.Services.AddScoped<RagAssetStatusAppService>();
+builder.Services.AddScoped<RagCaseAuditAppService>();
+builder.Services.AddScoped<RagOperationsAppService>();
 builder.Services.AddScoped<IAgentToolAssemblyService, AIDbOptimize.Infrastructure.Mcp.AgentToolAssemblyService>();
 builder.Services.AddScoped<IDbConfigOptimizationWorkflowService, DbConfigOptimizationWorkflowService>();
 builder.Services.AddScoped<IWorkflowReviewService, WorkflowReviewService>();
@@ -205,6 +241,7 @@ app.MapGet("/api/infrastructure", (IConfiguration configuration, IWebHostEnviron
 
 app.MapMcpApi();
 app.MapDataInitializationApi();
+app.MapRagApi();
 app.MapWorkflowsApi();
 app.MapWorkflowEventsApi();
 app.MapReviewsApi();

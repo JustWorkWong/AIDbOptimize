@@ -36,7 +36,7 @@ docs/workflow/
 ## 文件约定
 
 - `README.md`
-  workflow 后端代码流程主文档，描述 API、Application、Runtime、skills-v1 graph、持久化与投影之间的关系。
+  workflow 后端代码流程主文档，描述 API、Application、Runtime、skills-v1 graph、持久化与投影之间的关系，并同步记录 RAG 注入、ragSnapshots、citation 与 case audit 的真实落点。
 - `skills/`
   workflow skills 资产目录。后续 MySQL/PostgreSQL investigation skill、diagnosis skill，以及 bundle 说明都放在这里。
 - `skills/CLAUDE.md`
@@ -60,3 +60,4 @@ docs/workflow/
 2. `README.md` 中关于 skills 与 RAG 的描述必须区分“当前已实现”和“仅规划预留”。
 3. `README.md` 中的主链节点名必须与当前真实 graph 保持一致，尤其是 `InvestigationPlanner`、`EvidenceCollectionSubworkflow`、`SkillPolicyGate` 这类中间节点。
 4. 如果 skills 或 RAG 方案尚未真正落地到代码，不要在这里把规划内容写成既成事实。
+5. 如果 workflow 侧新增了用户可见的 RAG 入口，例如 `ragSnapshots`、`case audit` 或 recommendation citation，必须同步更新 `README.md`，避免前端行为和长期文档脱节。

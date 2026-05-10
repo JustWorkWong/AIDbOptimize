@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Design;
+using Pgvector.EntityFrameworkCore;
 
 namespace AIDbOptimize.Infrastructure.Persistence;
 
@@ -17,7 +18,7 @@ public sealed class ControlPlaneDesignTimeDbContextFactory : IDesignTimeDbContex
             ?? "Host=127.0.0.1;Port=15432;Database=aidbopt_control;Username=postgres;Password=Postgres123!";
 
         var optionsBuilder = new DbContextOptionsBuilder<ControlPlaneDbContext>();
-        optionsBuilder.UseNpgsql(connectionString);
+        optionsBuilder.UseNpgsql(connectionString, options => options.UseVector());
         return new ControlPlaneDbContext(optionsBuilder.Options);
     }
 }

@@ -7,16 +7,20 @@ import {
   getMcpConnections,
   updateToolApprovalMode,
 } from './api/mcp'
+import { getRagAssetStatus, getRagCaseAudit } from './api/rag'
 import DataInitStatusPanel from './components/mcp/DataInitStatusPanel.vue'
 import McpConnectionTable from './components/mcp/McpConnectionTable.vue'
 import McpToolExecutor from './components/mcp/McpToolExecutor.vue'
 import McpToolTable from './components/mcp/McpToolTable.vue'
+import RagAssetStatusPanel from './components/workflow/RagAssetStatusPanel.vue'
+import RagCaseAuditPanel from './components/workflow/RagCaseAuditPanel.vue'
 import WorkflowWorkspace from './components/workflow/WorkflowWorkspace.vue'
 import type {
   DataInitializationStatus,
   McpConnection,
   McpTool,
 } from './models/mcp'
+import type { RagAssetStatus, RagCaseAuditItem } from './models/rag'
 
 interface ServiceStatus {
   name: string
@@ -50,6 +54,10 @@ const tools = ref<McpTool[]>([])
 const savingApprovalToolId = ref('')
 const initStatusesLoading = ref(true)
 const initStatuses = ref<DataInitializationStatus[]>([])
+const ragAssetStatusLoading = ref(true)
+const ragAssetStatus = ref<RagAssetStatus | null>(null)
+const ragCaseAuditLoading = ref(true)
+const ragCaseAuditItems = ref<RagCaseAuditItem[]>([])
 
 const resourceLinks = computed<ResourceLink[]>(() => [
   {
@@ -87,6 +95,8 @@ onMounted(async () => {
     loadInfrastructureOverview(),
     loadMcpConnections(),
     loadInitializationStatuses(),
+    loadRagAssetStatus(),
+    loadRagCaseAudit(),
   ])
 })
 
@@ -187,6 +197,26 @@ async function loadInitializationStatuses(): Promise<void> {
     mcpErrorMessage.value = error instanceof Error ? error.message : '加载初始化状态失败。'
   } finally {
     initStatusesLoading.value = false
+  }
+}
+
+async function loadRagAssetStatus(): Promise<void> {
+  try {
+    ragAssetStatus.value = await getRagAssetStatus()
+  } catch (error) {
+    mcpErrorMessage.value = error instanceof Error ? error.message : '加载 RAG 资产状态失败。'
+  } finally {
+    ragAssetStatusLoading.value = false
+  }
+}
+
+async function loadRagCaseAudit(): Promise<void> {
+  try {
+    ragCaseAuditItems.value = await getRagCaseAudit()
+  } catch (error) {
+    mcpErrorMessage.value = error instanceof Error ? error.message : '加载 case audit 失败。'
+  } finally {
+    ragCaseAuditLoading.value = false
   }
 }
 </script>
@@ -307,6 +337,14 @@ async function loadInitializationStatuses(): Promise<void> {
         <DataInitStatusPanel
           :statuses="initStatuses"
           :loading="initStatusesLoading"
+        />
+        <RagAssetStatusPanel
+          :status="ragAssetStatus"
+          :loading="ragAssetStatusLoading"
+        />
+        <RagCaseAuditPanel
+          :items="ragCaseAuditItems"
+          :loading="ragCaseAuditLoading"
         />
       </section>
 

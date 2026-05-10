@@ -50,6 +50,7 @@ export interface WorkflowStructuredResult {
   summary: string
   recommendations: WorkflowRecommendation[]
   evidenceItems: WorkflowEvidenceItem[]
+  externalKnowledgeItems: WorkflowEvidenceItem[]
   missingContextItems: WorkflowMissingContextItem[]
   collectionMetadata: WorkflowCollectionMetadata[]
   warnings: string[]
@@ -69,6 +70,7 @@ export interface WorkflowRecommendation {
   appliesWhen: string | null
   ruleId: string | null
   ruleVersion: string | null
+  externalKnowledgeCitations: string[]
 }
 
 export interface WorkflowEvidenceItem {
@@ -164,6 +166,14 @@ export interface WorkflowSessionSummary {
   completedAt: string | null
 }
 
+export interface WorkflowRagSnapshot {
+  snapshotId: string
+  nodeExecutionId: string
+  snapshotTypeJson: string
+  retrievedItemsJson: string
+  createdAt: string
+}
+
 export interface WorkflowHistoryNodeExecution {
   executionId: string
   nodeName: string
@@ -215,6 +225,7 @@ export interface WorkflowHistoryDetail {
   error: string | null
   nodeExecutions: WorkflowHistoryNodeExecution[]
   toolExecutions: WorkflowHistoryToolExecution[]
+  ragSnapshots: WorkflowRagSnapshot[]
   reviews: WorkflowHistoryReview[]
   startedAt: string
   updatedAt: string
@@ -367,6 +378,10 @@ const workflowNodeCatalog: Record<string, Omit<WorkflowNodePresentation, 'key'>>
   SkillPolicyGate: {
     label: '策略门禁',
     description: '根据采集完整度判断通过、降级还是阻断。',
+  },
+  WorkflowRagContextAssembler: {
+    label: 'RAG 注入',
+    description: '在诊断前补充外部知识上下文，并保持与实时证据分层。',
   },
   DbConfigDiagnosisAgentExecutor: {
     label: '诊断生成',

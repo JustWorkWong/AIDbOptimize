@@ -150,6 +150,165 @@ public sealed class DbConfigQualityGateTests
     }
 
     [Fact]
+    public void GroundingExecutor_DoesNotTreatExternalKnowledgeAsObservedEvidence()
+    {
+        var executor = new DbConfigGroundingExecutor(new RecommendationSchemaValidator());
+        var evidence = new DbConfigEvidencePack(
+            DatabaseEngine.MySql,
+            "orders",
+            "collector",
+            [
+                new DbConfigRecommendation(
+                    "max_connections",
+                    "re-evaluate max_connections.",
+                    "medium",
+                    evidenceReferences: ["max_connections"])
+            ],
+            [
+                new DbConfigEvidenceItem("config", "threads_connected", "Only runtime concurrency was collected.")
+            ],
+            Array.Empty<string>(),
+            externalKnowledgeItems:
+            [
+                new DbConfigEvidenceItem(
+                    "fact",
+                    "[fact:mysql:connections] max_connections > Connections | https://example.com/mysql",
+                    "MySQL reference",
+                    "externalKnowledge",
+                    "max_connections is documented here",
+                    "[fact:mysql:connections] max_connections > Connections | https://example.com/mysql",
+                    null,
+                    "rag")
+            ]);
+        var reportJson = """
+        {
+          "title":"db-config report",
+          "summary":"re-evaluate max_connections",
+          "recommendations":[
+            {
+              "key":"max_connections",
+              "suggestion":"re-evaluate max_connections",
+              "severity":"medium",
+              "findingType":"connections",
+              "confidence":"medium",
+              "requiresMoreContext":false,
+              "impactSummary":"connection pressure",
+              "evidenceReferences":["[fact:mysql:connections] max_connections > Connections | https://example.com/mysql"],
+              "recommendationClass":"tuning",
+              "recommendationType":"actionableRecommendation",
+              "appliesWhen":"connection pressure is visible",
+              "ruleId":"mysql.connections.capacity",
+              "ruleVersion":"2026-04-30"
+            }
+          ],
+          "evidenceItems":[
+            {
+              "sourceType":"config",
+              "reference":"threads_connected",
+              "description":"Only runtime concurrency was collected.",
+              "category":"runtimeMetric",
+              "rawValue":"12",
+              "normalizedValue":"12",
+              "unit":null,
+              "sourceScope":"db",
+              "capturedAt":null,
+              "expiresAt":null,
+              "isCached":false,
+              "collectionMethod":"query"
+            }
+          ],
+          "missingContextItems":[],
+          "collectionMetadata":[],
+          "warnings":[]
+        }
+        """;
+
+        var error = Assert.Throws<InvalidOperationException>(() => executor.Validate(evidence, reportJson));
+
+        Assert.Contains("evidence", error.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void GroundingExecutor_RejectsUnknownExternalKnowledgeCitations()
+    {
+        var executor = new DbConfigGroundingExecutor(new RecommendationSchemaValidator());
+        var evidence = new DbConfigEvidencePack(
+            DatabaseEngine.PostgreSql,
+            "appdb",
+            "collector",
+            [
+                new DbConfigRecommendation(
+                    "shared_buffers",
+                    "re-evaluate shared_buffers.",
+                    "medium",
+                    evidenceReferences: ["shared_buffers"])
+            ],
+            [
+                new DbConfigEvidenceItem("config", "shared_buffers", "shared_buffers value.")
+            ],
+            Array.Empty<string>(),
+            externalKnowledgeItems:
+            [
+                new DbConfigEvidenceItem(
+                    "fact",
+                    "[fact:postgresql:memory] shared_buffers > Memory > shared_buffers | https://example.com/pg",
+                    "PostgreSQL reference",
+                    "externalKnowledge",
+                    "shared_buffers controls shared memory",
+                    "[fact:postgresql:memory] shared_buffers > Memory > shared_buffers | https://example.com/pg",
+                    null,
+                    "rag")
+            ]);
+        var reportJson = """
+        {
+          "title":"db-config report",
+          "summary":"re-evaluate shared_buffers",
+          "recommendations":[
+            {
+              "key":"shared_buffers",
+              "suggestion":"re-evaluate shared_buffers",
+              "severity":"medium",
+              "findingType":"memory",
+              "confidence":"medium",
+              "requiresMoreContext":false,
+              "impactSummary":"memory tuning",
+              "evidenceReferences":["shared_buffers"],
+              "recommendationClass":"tuning",
+              "recommendationType":"actionableRecommendation",
+              "appliesWhen":"memory pressure is visible",
+              "ruleId":"postgres.shared-buffers.reassessment",
+              "ruleVersion":"2026-04-30",
+              "externalKnowledgeCitations":["[fact:postgresql:memory] missing | https://example.com/missing"]
+            }
+          ],
+          "evidenceItems":[
+            {
+              "sourceType":"config",
+              "reference":"shared_buffers",
+              "description":"shared_buffers value",
+              "category":"configuration",
+              "rawValue":"256MB",
+              "normalizedValue":"256MB",
+              "unit":null,
+              "sourceScope":"db",
+              "capturedAt":null,
+              "expiresAt":null,
+              "isCached":false,
+              "collectionMethod":"query"
+            }
+          ],
+          "missingContextItems":[],
+          "collectionMetadata":[],
+          "warnings":[]
+        }
+        """;
+
+        var error = Assert.Throws<InvalidOperationException>(() => executor.Validate(evidence, reportJson));
+
+        Assert.Contains("externalKnowledgeCitations", error.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void RecommendationSchemaValidator_AllowsRicherRecommendationFields()
     {
         var validator = new RecommendationSchemaValidator();

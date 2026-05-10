@@ -56,6 +56,7 @@ internal static class WorkflowResultParser
                 GetString(root, "summary") ?? string.Empty,
                 ParseRecommendations(root),
                 ParseEvidenceItems(root),
+                ParseEvidenceItems(root, "externalKnowledgeItems"),
                 ParseMissingContextItems(root),
                 ParseCollectionMetadata(root),
                 ParseWarnings(root));
@@ -88,13 +89,16 @@ internal static class WorkflowResultParser
                 GetString(item, "recommendationType") ?? "actionableRecommendation",
                 GetString(item, "appliesWhen"),
                 GetString(item, "ruleId"),
-                GetString(item, "ruleVersion")))
+                GetString(item, "ruleVersion"),
+                ParseStringArray(item, "externalKnowledgeCitations")))
             .ToArray();
     }
 
-    private static IReadOnlyList<WorkflowEvidenceItemDto> ParseEvidenceItems(JsonElement root)
+    private static IReadOnlyList<WorkflowEvidenceItemDto> ParseEvidenceItems(
+        JsonElement root,
+        string propertyName = "evidenceItems")
     {
-        if (!root.TryGetProperty("evidenceItems", out var array) || array.ValueKind != JsonValueKind.Array)
+        if (!root.TryGetProperty(propertyName, out var array) || array.ValueKind != JsonValueKind.Array)
         {
             return [];
         }

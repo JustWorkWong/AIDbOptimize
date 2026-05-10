@@ -27,6 +27,7 @@ public sealed class ControlPlaneWorkflowRuntime(
     InvestigationPlanner investigationPlanner,
     EvidenceCollectionSubworkflow evidenceCollectionSubworkflow,
     SkillPolicyGate skillPolicyGate,
+    WorkflowRagContextAssembler workflowRagContextAssembler,
     IDbConfigDiagnosisAgentExecutor diagnosisAgentExecutor,
     RecommendationSchemaValidator schemaValidator,
     DbConfigGroundingExecutor groundingExecutor,
@@ -954,6 +955,9 @@ public sealed class ControlPlaneWorkflowRuntime(
         var policyGateExecutor = new FunctionExecutor<MafCollectedEvidenceMessage, MafPolicyMessage>(
             "SkillPolicyGate",
             (message, context, ct) => HandlePolicyGateMessageAsync(message, ct));
+        var ragContextExecutor = new FunctionExecutor<MafPolicyMessage, MafPolicyMessage>(
+            "WorkflowRagContextAssembler",
+            (message, context, ct) => HandleWorkflowRagContextMessageAsync(message, ct));
         var diagnosisExecutor = new FunctionExecutor<MafPolicyMessage, MafDiagnosisMessage>(
             "DbConfigDiagnosisAgentExecutor",
             (message, context, ct) => HandleDiagnosisMessageAsync(message, ct));
@@ -1002,6 +1006,7 @@ public sealed class ControlPlaneWorkflowRuntime(
         var plannerBinding = plannerExecutor.BindExecutor();
         var collectionBinding = collectionExecutor.BindExecutor();
         var policyGateBinding = policyGateExecutor.BindExecutor();
+        var ragContextBinding = ragContextExecutor.BindExecutor();
         var diagnosisBinding = diagnosisExecutor.BindExecutor();
         var groundingBinding = groundingExecutorBinding.BindExecutor();
         var blockedCompletionBinding = blockedCompletionExecutor.BindExecutor();
@@ -1016,8 +1021,9 @@ public sealed class ControlPlaneWorkflowRuntime(
             .AddEdge(startBinding, plannerBinding)
             .AddEdge(plannerBinding, collectionBinding)
             .AddEdge(collectionBinding, policyGateBinding)
-            .AddEdge<MafPolicyMessage>(policyGateBinding, diagnosisBinding, message => message?.GateDecision != SkillPolicyDecision.Blocked)
+            .AddEdge<MafPolicyMessage>(policyGateBinding, ragContextBinding, message => message?.GateDecision != SkillPolicyDecision.Blocked)
             .AddEdge<MafPolicyMessage>(policyGateBinding, blockedCompletionBinding, message => message?.GateDecision == SkillPolicyDecision.Blocked)
+            .AddEdge(ragContextBinding, diagnosisBinding)
             .AddEdge(diagnosisBinding, groundingBinding)
             .AddEdge<MafGroundedMessage>(groundingBinding, reviewRequestBinding, message => message?.Command?.RequireHumanReview == true)
             .AddEdge<MafGroundedMessage>(groundingBinding, directCompletionBinding, message => message?.Command?.RequireHumanReview != true)
@@ -1233,6 +1239,29 @@ public sealed class ControlPlaneWorkflowRuntime(
             diagnosis.AgentSessionId,
             diagnosis.SummaryId,
             diagnosis.TokenUsageJson);
+    }
+
+    private async ValueTask<MafPolicyMessage> HandleWorkflowRagContextMessageAsync(
+        MafPolicyMessage message,
+        CancellationToken cancellationToken)
+    {
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var session = await dbContext.WorkflowSessions
+            .SingleAsync(x => x.Id == message.SessionId, cancellationToken);
+        await ThrowIfWorkflowCancellationRequestedAsync(dbContext, session.Id, cancellationToken);
+        var sequence = await GetNextEventSequenceAsync(dbContext, session.Id, cancellationToken);
+        var enrichedEvidence = await ExecuteWorkflowRagContextAsync(
+            dbContext,
+            session,
+            message.Plan,
+            message.Evidence,
+            sequence,
+            cancellationToken);
+
+        return message with
+        {
+            Evidence = enrichedEvidence
+        };
     }
 
     private async ValueTask<MafGroundedMessage> HandleGroundingMessageAsync(
@@ -1711,6 +1740,76 @@ public sealed class ControlPlaneWorkflowRuntime(
             evidence.ExternalKnowledgeItems);
     }
 
+    private async Task<DbConfigEvidencePack> ExecuteWorkflowRagContextAsync(
+        ControlPlaneDbContext dbContext,
+        WorkflowSessionEntity session,
+        InvestigationPlan plan,
+        DbConfigEvidencePack evidence,
+        long nextSequence,
+        CancellationToken cancellationToken)
+    {
+        var inputJson = JsonSerializer.Serialize(new
+        {
+            plan.PlanId,
+            plan.RetrievalHints,
+            existingExternalKnowledgeCount = evidence.ExternalKnowledgeItems.Count
+        }, SerializerOptions);
+        var execution = CreateNodeExecution(session.Id, "WorkflowRagContextAssembler", "deterministic", inputJson);
+        dbContext.WorkflowNodeExecutions.Add(execution);
+        session.CurrentNodeKey = execution.NodeKey;
+        session.UpdatedAt = DateTimeOffset.UtcNow;
+        UpdateStateJson(session, new
+        {
+            sessionId = session.Id,
+            status = PublicStatus(session.Status),
+            currentNode = session.CurrentNodeKey
+        });
+        AppendEvent(dbContext, session.Id, ref nextSequence, WorkflowEventType.ExecutorStarted, "executor.started", new
+        {
+            nodeName = execution.NodeKey
+        }, "Workflow RAG context assembler started.", execution.Id);
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        var enrichedEvidence = await workflowRagContextAssembler.EnrichAsync(plan, evidence, cancellationToken);
+        var snapshot = new RagRetrievalSnapshotEntity
+        {
+            Id = Guid.NewGuid(),
+            WorkflowSessionId = session.Id,
+            NodeExecutionId = execution.Id,
+            SnapshotTypeJson = JsonSerializer.Serialize(new
+            {
+                status = enrichedEvidence.CollectionMetadata
+                    .FirstOrDefault(item => string.Equals(item.Name, "rag_status", StringComparison.OrdinalIgnoreCase))
+                    ?.Value ?? "unknown",
+                retrievalHints = plan.RetrievalHints,
+                externalKnowledgeCount = enrichedEvidence.ExternalKnowledgeItems.Count
+            }, SerializerOptions),
+            RetrievedItemsJson = JsonSerializer.Serialize(enrichedEvidence.ExternalKnowledgeItems, SerializerOptions),
+            CreatedAt = DateTimeOffset.UtcNow
+        };
+        dbContext.RagRetrievalSnapshots.Add(snapshot);
+
+        CompleteNodeExecution(execution, JsonSerializer.Serialize(enrichedEvidence, SerializerOptions));
+        session.CurrentNodeKey = execution.NodeKey;
+        session.UpdatedAt = DateTimeOffset.UtcNow;
+        UpdateStateJson(session, new
+        {
+            sessionId = session.Id,
+            status = PublicStatus(session.Status),
+            currentNode = session.CurrentNodeKey,
+            externalKnowledgeCount = enrichedEvidence.ExternalKnowledgeItems.Count,
+            ragSnapshotId = snapshot.Id
+        });
+        AppendEvent(dbContext, session.Id, ref nextSequence, WorkflowEventType.ExecutorCompleted, "executor.completed", new
+        {
+            nodeName = execution.NodeKey,
+            externalKnowledgeCount = enrichedEvidence.ExternalKnowledgeItems.Count,
+            ragSnapshotId = snapshot.Id
+        }, "Workflow RAG context assembler completed.", execution.Id);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return enrichedEvidence;
+    }
+
     private async Task ExecuteGroundingAsync(
         ControlPlaneDbContext dbContext,
         WorkflowSessionEntity session,
@@ -2062,6 +2161,7 @@ public sealed class ControlPlaneWorkflowRuntime(
             activeReviewTaskId = session.ActiveReviewTaskId,
             engineRunId = session.EngineRunId,
             engineCheckpointRef = session.EngineCheckpointRef,
+            ragSnapshotId = ParseJsonObject(session.StateJson)["ragSnapshotId"]?.GetValue<string>(),
             updatedAt = session.UpdatedAt,
             completedAt = session.CompletedAt
         }, SerializerOptions);

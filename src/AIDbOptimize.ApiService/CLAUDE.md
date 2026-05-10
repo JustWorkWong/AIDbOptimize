@@ -17,6 +17,7 @@ AIDbOptimize.ApiService/
 │   ├── DataInitializationApi.cs
 │   ├── HistoryApi.cs
 │   ├── McpApi.cs
+│   ├── RagApi.cs
 │   ├── ReviewsApi.cs
 │   ├── WorkflowEventsApi.cs
 │   └── WorkflowsApi.cs
@@ -34,6 +35,7 @@ AIDbOptimize.ApiService/
 - `appsettings.Local.json`: 本地私有配置，当前用于注入 DashScope/Qwen diagnosis agent 配置，不提交远程。
 - `Api/DataInitializationApi.cs`: 暴露数据初始化状态查询。
 - `Api/McpApi.cs`: 暴露 MCP 连接、工具发现、执行与审批模式更新接口。
+- `Api/RagApi.cs`: 暴露 RAG 资产状态查询接口。
 - `Api/WorkflowsApi.cs`: 暴露数据库配置优化 workflow 启动、查询、列表与取消接口。
 - `Api/WorkflowEventsApi.cs`: 暴露 workflow 基于持久化事件的 SSE replay 接口。
 - `Api/ReviewsApi.cs`: 暴露 workflow review 任务查询与提交接口。

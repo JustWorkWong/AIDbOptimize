@@ -8,6 +8,7 @@ internal static class WorkflowProgressCalculator
         ["InvestigationPlanner"] = 25,
         ["EvidenceCollectionSubworkflow"] = 45,
         ["SkillPolicyGate"] = 55,
+        ["WorkflowRagContextAssembler"] = 62,
         ["DbConfigDiagnosisAgentExecutor"] = 70,
         ["DbConfigGroundingExecutor"] = 85,
         ["DbConfigHumanReviewGateExecutor"] = 90,

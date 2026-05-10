@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
+using Pgvector;
 
 #nullable disable
 
@@ -20,6 +21,7 @@ namespace AIDbOptimize.Infrastructure.Persistence.Migrations.ControlPlane
                 .HasAnnotation("ProductVersion", "9.0.4")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
+            NpgsqlModelBuilderExtensions.HasPostgresExtension(modelBuilder, "vector");
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
             modelBuilder.Entity("AIDbOptimize.Infrastructure.Persistence.Entities.AgentMessageEntity", b =>
@@ -398,6 +400,250 @@ namespace AIDbOptimize.Infrastructure.Persistence.Migrations.ControlPlane
                         .HasDatabaseName("idx_mcp_tool_executions_session_node");
 
                     b.ToTable("mcp_tool_executions", (string)null);
+                });
+
+            modelBuilder.Entity("AIDbOptimize.Infrastructure.Persistence.Entities.RagCaseEvidenceLinkEntity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CaseRecordId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("EvidenceReference")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("RecommendationKey")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CaseRecordId")
+                        .HasDatabaseName("idx_rag_case_evidence_links_case_record");
+
+                    b.ToTable("rag_case_evidence_links", (string)null);
+                });
+
+            modelBuilder.Entity("AIDbOptimize.Infrastructure.Persistence.Entities.RagCaseRecordEntity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Engine")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<string>("Outcome")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<string>("ProblemType")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<string>("RecommendationType")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("character varying(60)");
+
+                    b.Property<string>("ReviewStatus")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<string>("Summary")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("WorkflowSessionId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("WorkflowSessionId")
+                        .IsUnique()
+                        .HasDatabaseName("idx_rag_case_records_workflow_session");
+
+                    b.ToTable("rag_case_records", (string)null);
+                });
+
+            modelBuilder.Entity("AIDbOptimize.Infrastructure.Persistence.Entities.RagDocumentChunkEntity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("AppliesTo")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("ChunkKey")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("DocumentId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Vector>("Embedding")
+                        .HasColumnType("vector");
+
+                    b.Property<string>("KeywordsJson")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("ParameterNamesJson")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("ProductVersion")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("SectionPath")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<string>("Text")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DocumentId", "ChunkKey")
+                        .IsUnique()
+                        .HasDatabaseName("idx_rag_document_chunks_document_chunk_key");
+
+                    b.ToTable("rag_document_chunks", (string)null);
+                });
+
+            modelBuilder.Entity("AIDbOptimize.Infrastructure.Persistence.Entities.RagDocumentEntity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CapturedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ContentHash")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("DocumentType")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<string>("Engine")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("SourcePath")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<string>("SourceTitle")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<string>("SourceUrl")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Topic")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Vendor")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SourcePath")
+                        .IsUnique()
+                        .HasDatabaseName("idx_rag_documents_source_path");
+
+                    b.HasIndex("Engine", "Vendor", "Topic")
+                        .HasDatabaseName("idx_rag_documents_engine_vendor_topic");
+
+                    b.ToTable("rag_documents", (string)null);
+                });
+
+            modelBuilder.Entity("AIDbOptimize.Infrastructure.Persistence.Entities.RagRetrievalSnapshotEntity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("NodeExecutionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("RetrievedItemsJson")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("SnapshotTypeJson")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("WorkflowSessionId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("NodeExecutionId")
+                        .HasDatabaseName("idx_rag_retrieval_snapshots_node");
+
+                    b.HasIndex("WorkflowSessionId")
+                        .HasDatabaseName("idx_rag_retrieval_snapshots_session");
+
+                    b.ToTable("rag_retrieval_snapshots", (string)null);
                 });
 
             modelBuilder.Entity("AIDbOptimize.Infrastructure.Persistence.Entities.WorkflowCheckpointEntity", b =>
@@ -870,6 +1116,58 @@ namespace AIDbOptimize.Infrastructure.Persistence.Migrations.ControlPlane
                     b.Navigation("WorkflowSession");
                 });
 
+            modelBuilder.Entity("AIDbOptimize.Infrastructure.Persistence.Entities.RagCaseEvidenceLinkEntity", b =>
+                {
+                    b.HasOne("AIDbOptimize.Infrastructure.Persistence.Entities.RagCaseRecordEntity", "CaseRecord")
+                        .WithMany("EvidenceLinks")
+                        .HasForeignKey("CaseRecordId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("CaseRecord");
+                });
+
+            modelBuilder.Entity("AIDbOptimize.Infrastructure.Persistence.Entities.RagCaseRecordEntity", b =>
+                {
+                    b.HasOne("AIDbOptimize.Infrastructure.Persistence.Entities.WorkflowSessionEntity", "WorkflowSession")
+                        .WithMany("RagCaseRecords")
+                        .HasForeignKey("WorkflowSessionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("WorkflowSession");
+                });
+
+            modelBuilder.Entity("AIDbOptimize.Infrastructure.Persistence.Entities.RagDocumentChunkEntity", b =>
+                {
+                    b.HasOne("AIDbOptimize.Infrastructure.Persistence.Entities.RagDocumentEntity", "Document")
+                        .WithMany("Chunks")
+                        .HasForeignKey("DocumentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Document");
+                });
+
+            modelBuilder.Entity("AIDbOptimize.Infrastructure.Persistence.Entities.RagRetrievalSnapshotEntity", b =>
+                {
+                    b.HasOne("AIDbOptimize.Infrastructure.Persistence.Entities.WorkflowNodeExecutionEntity", "NodeExecution")
+                        .WithMany("RagRetrievalSnapshots")
+                        .HasForeignKey("NodeExecutionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("AIDbOptimize.Infrastructure.Persistence.Entities.WorkflowSessionEntity", "WorkflowSession")
+                        .WithMany("RagRetrievalSnapshots")
+                        .HasForeignKey("WorkflowSessionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("NodeExecution");
+
+                    b.Navigation("WorkflowSession");
+                });
+
             modelBuilder.Entity("AIDbOptimize.Infrastructure.Persistence.Entities.WorkflowCheckpointEntity", b =>
                 {
                     b.HasOne("AIDbOptimize.Infrastructure.Persistence.Entities.WorkflowSessionEntity", "WorkflowSession")
@@ -1005,9 +1303,21 @@ namespace AIDbOptimize.Infrastructure.Persistence.Migrations.ControlPlane
                     b.Navigation("WorkflowEvents");
                 });
 
+            modelBuilder.Entity("AIDbOptimize.Infrastructure.Persistence.Entities.RagCaseRecordEntity", b =>
+                {
+                    b.Navigation("EvidenceLinks");
+                });
+
+            modelBuilder.Entity("AIDbOptimize.Infrastructure.Persistence.Entities.RagDocumentEntity", b =>
+                {
+                    b.Navigation("Chunks");
+                });
+
             modelBuilder.Entity("AIDbOptimize.Infrastructure.Persistence.Entities.WorkflowNodeExecutionEntity", b =>
                 {
                     b.Navigation("Events");
+
+                    b.Navigation("RagRetrievalSnapshots");
 
                     b.Navigation("ReviewTasks");
                 });
@@ -1028,6 +1338,10 @@ namespace AIDbOptimize.Infrastructure.Persistence.Migrations.ControlPlane
                     b.Navigation("Events");
 
                     b.Navigation("NodeExecutions");
+
+                    b.Navigation("RagCaseRecords");
+
+                    b.Navigation("RagRetrievalSnapshots");
 
                     b.Navigation("ReviewTasks");
 

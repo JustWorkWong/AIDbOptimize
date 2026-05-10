@@ -109,6 +109,18 @@ public sealed class WorkflowHistoryService(
                 x.CompletedAt))
             .ToListAsync(cancellationToken);
 
+        var ragSnapshots = await dbContext.RagRetrievalSnapshots
+            .AsNoTracking()
+            .Where(x => x.WorkflowSessionId == workflowSessionId)
+            .OrderBy(x => x.CreatedAt)
+            .Select(x => new WorkflowRagSnapshotDto(
+                x.Id.ToString(),
+                x.NodeExecutionId.ToString(),
+                x.SnapshotTypeJson,
+                x.RetrievedItemsJson,
+                x.CreatedAt))
+            .ToListAsync(cancellationToken);
+
         WorkflowSummaryReferenceDto? summary = null;
         if (session.AgentSessionId.HasValue)
         {
@@ -143,6 +155,7 @@ public sealed class WorkflowHistoryService(
             session.ErrorMessage,
             nodeExecutions,
             toolExecutions,
+            ragSnapshots,
             reviews,
             session.CreatedAt,
             session.UpdatedAt,

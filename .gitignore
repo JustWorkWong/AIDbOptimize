@@ -10,4 +10,28 @@ __pycache__/
 *.user
 *.suo
 src/AIDbOptimize.ApiService/appsettings.Local.json
+src/AIDbOptimize.DataInit/appsettings.Local.json
 .claude/
+
+# RAG corpus local caches and bulk payloads
+docs/rag/**/_bulk/
+docs/rag/**/_cache/
+docs/rag/**/_downloads/
+
+# Prepared outputs are local by default; keep docs and minimal samples trackable
+docs/rag/prepared/*
+!docs/rag/prepared/README.md
+!docs/rag/prepared/facts/
+!docs/rag/prepared/cases/
+docs/rag/prepared/facts/*
+!docs/rag/prepared/facts/README.md
+!docs/rag/prepared/facts/samples/
+docs/rag/prepared/facts/samples/*
+!docs/rag/prepared/facts/samples/README.md
+!docs/rag/prepared/facts/samples/*.sample.*
+docs/rag/prepared/cases/*
+!docs/rag/prepared/cases/README.md
+!docs/rag/prepared/cases/samples/
+docs/rag/prepared/cases/samples/*
+!docs/rag/prepared/cases/samples/README.md
+!docs/rag/prepared/cases/samples/*.sample.*

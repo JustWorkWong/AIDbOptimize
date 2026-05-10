@@ -19,18 +19,26 @@
 - [docs/README.md](./docs/README.md)
 - [Workflow 后端代码流程说明](./docs/workflow/README.md)
 
+当前执行计划：
+
+- [RAG 平台接入方案](./docs/plans/active/2026-05-aidboptimize-rag-platform/design.md)
+- [RAG 平台接入详细方案](./docs/plans/active/2026-05-aidboptimize-rag-platform/detailed-design.md)
+- [RAG 平台接入任务清单](./docs/plans/active/2026-05-aidboptimize-rag-platform/tasks.md)
+
 最近完成计划（当前默认基线）：
 
 - [workflow skills v1 方案](./docs/plans/active/2026-05-aidboptimize-workflow-skills-v1/design.md)
 - [workflow skills v1 详细方案](./docs/plans/active/2026-05-aidboptimize-workflow-skills-v1/detailed-design.md)
 - [workflow skills v1 任务清单](./docs/plans/active/2026-05-aidboptimize-workflow-skills-v1/tasks.md)
 
-当前没有新的未完成 active plan；上面这组文档用于描述最近一次已经落地的实现基线。
+当前这轮需求以 `RAG` 计划为准；`workflow skills v1` 继续作为最近完成的实现基线。
 
-## 当前验证快照（2026-05-07）
+## 当前验证快照（2026-05-09）
 
-- `workflow skills v1` 已进入真实 workflow 主链，`RAG` 仍然只保留协议与扩展位
-- `dotnet test .\AIDbOptimize.slnx --no-restore` 通过，当前共 `84` 个测试
+- `workflow skills v1` 已进入真实 workflow 主链
+- `docs/rag/` 长期目录骨架、`Rag/Corpus` 命名契约与固定 seed catalog 已落地
+- workflow 已新增 `WorkflowRagContextAssembler` 显式注入节点，并具备 facts/cases 检索基线、embedding 适配层、pgvector 存储接线，以及 `validate/rebuild/case audit` 运维入口
+- `dotnet test .\AIDbOptimize.slnx --no-restore` 通过，当前共 `125` 个测试
 - `npm run build` (`src/AIDbOptimize.Web`) 通过
 
 ## 启动方式
@@ -75,6 +83,6 @@ dotnet run --project .\src\AIDbOptimize.AppHost\AIDbOptimize.AppHost.csproj
 - workflow skills v1：bundle/version 解析、skill 驱动的采集规划、policy gate、`recommendationType`
 - MCP 控制面、工具执行审计与 agent 持久化
 - 对应测试工程与前端工作台
-- `RAG` 仅预留未来插入位，尚未接入真实 retrieval
+- `RAG` 已有 corpus 骨架、基础 ingestion、facts/cases 检索基线，以及 pgvector / embedding backend 的基础接线
 
 后续如进入新一轮中大型需求，以仓库根 [CLAUDE.md](./CLAUDE.md) 为准：先建立新 plan，再切换默认执行指针。

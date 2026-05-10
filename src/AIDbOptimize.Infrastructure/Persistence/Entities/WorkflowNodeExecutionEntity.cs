@@ -42,4 +42,6 @@ public sealed class WorkflowNodeExecutionEntity
     public ICollection<WorkflowReviewTaskEntity> ReviewTasks { get; set; } = [];
 
     public ICollection<WorkflowEventEntity> Events { get; set; } = [];
+
+    public ICollection<RagRetrievalSnapshotEntity> RagRetrievalSnapshots { get; set; } = [];
 }

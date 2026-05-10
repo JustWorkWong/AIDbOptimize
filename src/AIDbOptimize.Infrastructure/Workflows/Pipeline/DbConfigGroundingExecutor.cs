@@ -19,6 +19,9 @@ public sealed class DbConfigGroundingExecutor(
             .Select(item => item.Reference)
             .Concat(evidence.MissingContextItems.Select(item => item.Reference))
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var externalKnowledgeCitations = evidence.ExternalKnowledgeItems
+            .Select(item => item.NormalizedValue ?? item.Reference)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         if (!root.TryGetProperty("recommendations", out var recommendations))
         {
@@ -54,6 +57,35 @@ public sealed class DbConfigGroundingExecutor(
             if (!evidenceReferences.Contains(key))
             {
                 throw new InvalidOperationException($"recommendation `{key}` 缺少对应 evidence。");
+            }
+        }
+
+        ValidateExternalKnowledgeCitations(recommendations, externalKnowledgeCitations);
+    }
+
+    private static void ValidateExternalKnowledgeCitations(
+        JsonElement recommendations,
+        IReadOnlySet<string> externalKnowledgeCitations)
+    {
+        foreach (var item in recommendations.EnumerateArray())
+        {
+            if (!item.TryGetProperty("externalKnowledgeCitations", out var citations) ||
+                citations.ValueKind != JsonValueKind.Array)
+            {
+                continue;
+            }
+
+            var key = item.TryGetProperty("key", out var keyProp) ? keyProp.GetString() : "unknown";
+            var invalid = citations.EnumerateArray()
+                .Where(static citation => citation.ValueKind == JsonValueKind.String)
+                .Select(static citation => citation.GetString())
+                .Where(static citation => !string.IsNullOrWhiteSpace(citation))
+                .Cast<string>()
+                .Any(citation => !externalKnowledgeCitations.Contains(citation));
+
+            if (invalid)
+            {
+                throw new InvalidOperationException($"recommendation `{key}` 包含未解析的 externalKnowledgeCitations。");
             }
         }
     }

@@ -16,6 +16,7 @@ public sealed record WorkflowHistoryDetailDto(
     string? Error,
     IReadOnlyList<WorkflowHistoryNodeExecutionDto> NodeExecutions,
     IReadOnlyList<WorkflowHistoryToolExecutionDto> ToolExecutions,
+    IReadOnlyList<WorkflowRagSnapshotDto> RagSnapshots,
     IReadOnlyList<WorkflowHistoryReviewDto> Reviews,
     DateTimeOffset StartedAt,
     DateTimeOffset UpdatedAt,
@@ -55,3 +56,10 @@ public sealed record WorkflowHistoryReviewDto(
     string? AdjustmentsJson,
     DateTimeOffset CreatedAt,
     DateTimeOffset? ReviewedAt);
+
+public sealed record WorkflowRagSnapshotDto(
+    string SnapshotId,
+    string NodeExecutionId,
+    string SnapshotTypeJson,
+    string RetrievedItemsJson,
+    DateTimeOffset CreatedAt);

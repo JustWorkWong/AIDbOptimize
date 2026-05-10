@@ -53,6 +53,9 @@ const runtimeItems = computed(() =>
 const observabilityItems = computed(() =>
   parsedReport.value?.evidenceItems.filter(item => item.category === 'observability').slice(0, 8) ?? [])
 
+const externalKnowledgeItems = computed(() =>
+  parsedReport.value?.externalKnowledgeItems.slice(0, 8) ?? [])
+
 function displayValue(item: WorkflowEvidenceItem): string {
   return item.normalizedValue || item.rawValue || '无'
 }
@@ -164,6 +167,9 @@ function metadataValue(name: string): WorkflowCollectionMetadata | undefined {
               <p v-if="item.evidenceReferences.length" class="structured-note">
                 证据引用：{{ item.evidenceReferences.join(', ') }}
               </p>
+              <p v-if="item.externalKnowledgeCitations.length" class="structured-note">
+                外部知识引用：{{ item.externalKnowledgeCitations.join(' ; ') }}
+              </p>
             </article>
           </div>
         </section>
@@ -226,6 +232,21 @@ function metadataValue(name: string): WorkflowCollectionMetadata | undefined {
               </div>
               <p class="structured-note">采集时间：{{ formatWorkflowDateTime(item.capturedAt) }}</p>
               <p class="structured-note">过期时间：{{ formatWorkflowDateTime(item.expiresAt) }}</p>
+            </article>
+          </div>
+        </section>
+
+        <section v-if="externalKnowledgeItems.length" class="structured-section">
+          <h3>外部知识引用</h3>
+          <div class="structured-list compact-grid">
+            <article v-for="item in externalKnowledgeItems" :key="item.reference" class="structured-card">
+              <strong>{{ item.reference }}</strong>
+              <p>{{ item.description }}</p>
+              <p class="structured-note">{{ displayValue(item) }}</p>
+              <div class="meta-chip-row">
+                <span class="meta-chip">{{ item.sourceScope }}</span>
+                <span class="meta-chip">{{ item.collectionMethod || 'rag-query' }}</span>
+              </div>
             </article>
           </div>
         </section>

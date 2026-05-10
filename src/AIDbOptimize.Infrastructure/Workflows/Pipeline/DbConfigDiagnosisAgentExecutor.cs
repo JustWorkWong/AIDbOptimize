@@ -70,7 +70,7 @@ public sealed class DbConfigDiagnosisAgentExecutor(
             evidence: evidence,
             diagnosisSkill: diagnosisSkill);
 
-        var agent = BuildAgent(_options, _loggerFactory, _services);
+        var agent = BuildAgent(_options, _loggerFactory, _services, evidence);
         // 让 ChatClientAgent 在每次调用时自行创建会话，避免依赖服务端会话存储。
         var response = await agent.RunAsync(
             prompt,
@@ -90,12 +90,33 @@ public sealed class DbConfigDiagnosisAgentExecutor(
         var recommendations = diagnosisSkill is null
             ? value.Recommendations.Select(EnsureRecommendationType).ToArray()
             : _diagnosisRuleEvaluator.Evaluate(evidence, diagnosisSkill, value.Recommendations);
+        var enrichedRecommendations = recommendations
+            .Select(item => new
+            {
+                key = item.Key,
+                suggestion = item.Suggestion,
+                severity = item.Severity,
+                findingType = item.FindingType,
+                confidence = item.Confidence,
+                requiresMoreContext = item.RequiresMoreContext,
+                impactSummary = item.ImpactSummary,
+                evidenceReferences = item.EvidenceReferences,
+                recommendationClass = item.RecommendationClass,
+                recommendationType = item.RecommendationType == DbConfigRecommendationType.ActionableRecommendation
+                    ? "actionableRecommendation"
+                    : "requestMoreContext",
+                appliesWhen = item.AppliesWhen,
+                ruleId = item.RuleId,
+                ruleVersion = item.RuleVersion,
+                externalKnowledgeCitations = ResolveExternalKnowledgeCitations(evidence, item)
+            })
+            .ToArray();
 
         var reportJson = JsonSerializer.Serialize(new
         {
             title = value.Title,
             summary = value.Summary,
-            recommendations,
+            recommendations = enrichedRecommendations,
             evidenceItems = value.EvidenceItems,
             missingContextItems = value.MissingContextItems ?? evidence.MissingContextItems,
             collectionMetadata = value.CollectionMetadata ?? evidence.CollectionMetadata,
@@ -110,7 +131,8 @@ public sealed class DbConfigDiagnosisAgentExecutor(
     private static ChatClientAgent BuildAgent(
         DbConfigDiagnosisAgentOptions options,
         ILoggerFactory loggerFactory,
-        IServiceProvider services)
+        IServiceProvider services,
+        DbConfigEvidencePack evidence)
     {
         if (!options.IsConfigured)
         {
@@ -133,7 +155,8 @@ public sealed class DbConfigDiagnosisAgentExecutor(
             {
                 Name = "DbConfigDiagnosisAgent",
                 Description = "Generate a grounded db configuration optimization report.",
-                ChatOptions = BuildChatOptions(options)
+                ChatOptions = BuildChatOptions(options),
+                AIContextProviders = [new RagRetrievedKnowledgeContextProvider(evidence)]
             },
             clientFactory: null,
             loggerFactory: loggerFactory,
@@ -208,6 +231,32 @@ title、summary、suggestion 等自然语言字段必须使用中文。
             text,
             @"(\d+(\.\d+)?\s*(KB|MB|GB|TB|%|cores?))|(调整到|设置为|set to|tune to)",
             System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+    }
+
+    private static IReadOnlyList<string> ResolveExternalKnowledgeCitations(
+        DbConfigEvidencePack evidence,
+        DbConfigRecommendation recommendation)
+    {
+        return evidence.ExternalKnowledgeItems
+            .Where(item => IsCitationMatch(item, recommendation))
+            .Select(item => item.NormalizedValue ?? item.Reference)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static bool IsCitationMatch(
+        DbConfigEvidenceItem item,
+        DbConfigRecommendation recommendation)
+    {
+        if (recommendation.EvidenceReferences.Any(reference =>
+                string.Equals(reference, item.Reference, StringComparison.OrdinalIgnoreCase)))
+        {
+            return true;
+        }
+
+        return item.Reference.Contains(recommendation.Key, StringComparison.OrdinalIgnoreCase)
+            || (item.RawValue?.Contains(recommendation.Key, StringComparison.OrdinalIgnoreCase) ?? false)
+            || (item.NormalizedValue?.Contains(recommendation.Key, StringComparison.OrdinalIgnoreCase) ?? false);
     }
 
     private static DbConfigRecommendation EnsureRecommendationType(DbConfigRecommendation recommendation)

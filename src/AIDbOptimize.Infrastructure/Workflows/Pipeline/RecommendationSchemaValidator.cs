@@ -31,6 +31,11 @@ public sealed class RecommendationSchemaValidator
             RequireNullableString(item, "appliesWhen");
             RequireNullableString(item, "ruleId");
             RequireNullableString(item, "ruleVersion");
+            if (item.TryGetProperty("externalKnowledgeCitations", out var citations) &&
+                citations.ValueKind != JsonValueKind.Array)
+            {
+                throw new InvalidOperationException("reportJson 字段类型不合法：externalKnowledgeCitations。");
+            }
         }
 
         RequireArray(root, "evidenceItems");
