@@ -200,7 +200,7 @@ public sealed partial class RagVectorStoreCollection(
             SourceUrl = chunk.Document.SourceUrl,
             ParameterNamesJson = chunk.ParameterNamesJson,
             Text = chunk.Text,
-            Citation = $"[fact] {chunk.Title} ¡ª {chunk.SectionPath} ({chunk.ProductVersion}) {chunk.Document.SourceUrl}",
+            Citation = $"[fact] {chunk.Title} â€” {chunk.SectionPath} ({chunk.ProductVersion}) {chunk.Document.SourceUrl}",
             Vector = ReadOnlyMemory<float>.Empty
         };
     }

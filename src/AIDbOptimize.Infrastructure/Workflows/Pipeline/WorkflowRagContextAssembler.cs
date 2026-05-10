@@ -208,8 +208,8 @@ public sealed partial class RagKnowledgeQueryService(
     private static RetrievedKnowledgeItem BuildCaseKnowledgeItem(RagCaseRecordEntity caseRecord, int matchCount)
     {
         var historyUrl = $"/api/history/{caseRecord.WorkflowSessionId}";
-        var reference = $"[case] {caseRecord.ProblemType} ¡ª workflow-session:{caseRecord.WorkflowSessionId} ({caseRecord.CreatedAt:yyyy-MM-dd}) {historyUrl}";
-        var citation = $"[case] {caseRecord.ProblemType} ¡ª workflow-session:{caseRecord.WorkflowSessionId} ({caseRecord.CreatedAt:yyyy-MM-dd}) {historyUrl}";
+        var reference = $"[case] {caseRecord.ProblemType} â€” workflow-session:{caseRecord.WorkflowSessionId} ({caseRecord.CreatedAt:yyyy-MM-dd}) {historyUrl}";
+        var citation = $"[case] {caseRecord.ProblemType} â€” workflow-session:{caseRecord.WorkflowSessionId} ({caseRecord.CreatedAt:yyyy-MM-dd}) {historyUrl}";
         return new RetrievedKnowledgeItem(
             caseRecord.Id.ToString(),
             "case",
